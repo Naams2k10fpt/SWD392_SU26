@@ -1,0 +1,27 @@
+@startuml
+autonumber
+actor User
+participant "Client" as Client
+participant "Auth API (.NET)" as Api
+database "MySQL/MariaDB" as Db
+
+== Register ==
+User -> Client: submit email/password/display name
+Client -> Api: POST /auth/register
+Api -> Db: check email uniqueness
+Db --> Api: not found
+Api -> Api: hash password
+Api -> Db: insert user + default role
+Db --> Api: user id + role
+Api -> Api: create JWT
+Api --> Client: 201 Created + token
+
+== Login ==
+User -> Client: submit email/password
+Client -> Api: POST /auth/login
+Api -> Db: find user by email
+Db --> Api: user + password hash + role
+Api -> Api: verify password
+Api -> Api: create JWT with role claim
+Api --> Client: 200 OK + token
+@enduml

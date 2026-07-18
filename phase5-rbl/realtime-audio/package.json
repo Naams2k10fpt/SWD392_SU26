@@ -1,0 +1,19 @@
+{
+  "name": "lucy-rbl-realtime-audio",
+  "version": "0.1.0",
+  "description": "Phase 2 RBL Socket.IO real-time audio MVP scaffold with Agora token endpoint concept.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js"
+  },
+  "dependencies": {
+    "@socket.io/admin-ui": "^0.5.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.19.2",
+    "mysql2": "^3.11.5",
+    "socket.io": "^4.7.5"
+  }
+}

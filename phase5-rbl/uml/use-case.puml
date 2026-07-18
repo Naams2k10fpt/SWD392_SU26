@@ -1,0 +1,38 @@
+@startuml
+left to right direction
+skinparam packageStyle rectangle
+
+actor "Anonymous User" as Anonymous
+actor "Pro\n(Mentor)" as Pro
+actor "Super\n(Creator)" as Super
+
+rectangle "LUCY Phase 1 System" {
+  usecase "View public intro" as UC_Public
+  usecase "Register account" as UC_Register
+  usecase "Login" as UC_Login
+  usecase "Receive JWT" as UC_Jwt
+  usecase "View assigned learners" as UC_Learners
+  usecase "Review learning content" as UC_ReviewContent
+  usecase "Import learning content" as UC_Import
+  usecase "Manage languages/stages/levels" as UC_ContentModel
+  usecase "Manage user roles" as UC_Roles
+  usecase "Review UML model" as UC_UML
+}
+
+Anonymous --> UC_Public
+Anonymous --> UC_Register
+Anonymous --> UC_Login
+UC_Login --> UC_Jwt : <<include>>
+UC_Register --> UC_Jwt : <<include>>
+
+Pro --> UC_Login
+Pro --> UC_Learners
+Pro --> UC_ReviewContent
+Pro --> UC_UML
+
+Super --> UC_Login
+Super --> UC_Import
+Super --> UC_ContentModel
+Super --> UC_Roles
+Super --> UC_UML
+@enduml

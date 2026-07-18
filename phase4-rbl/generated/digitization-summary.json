@@ -1,0 +1,155 @@
+{
+  "source_files": [
+    {
+      "file_name": "Chinese - level 1-30.docx",
+      "language_code": "zh",
+      "language_name": "Chinese",
+      "stage_number": 1,
+      "level_start": 1,
+      "level_end": 30,
+      "include": true,
+      "note": ""
+    },
+    {
+      "file_name": "Chinese - level 31-60.docx",
+      "language_code": "zh",
+      "language_name": "Chinese",
+      "stage_number": 2,
+      "level_start": 31,
+      "level_end": 60,
+      "include": true,
+      "note": ""
+    },
+    {
+      "file_name": "chinese level 61-100.docx",
+      "language_code": "zh",
+      "language_name": "Chinese",
+      "stage_number": 3,
+      "level_start": 61,
+      "level_end": 100,
+      "include": true,
+      "note": ""
+    },
+    {
+      "file_name": "Eng - STAGE 1 (LEVELS 1-30).docx",
+      "language_code": "en",
+      "language_name": "English",
+      "stage_number": 1,
+      "level_start": 1,
+      "level_end": 30,
+      "include": true,
+      "note": ""
+    },
+    {
+      "file_name": "Eng - STAGE 2 (LEVEL 31-60) REVIEWED_SID.docx",
+      "language_code": "en",
+      "language_name": "English",
+      "stage_number": 2,
+      "level_start": 31,
+      "level_end": 60,
+      "include": true,
+      "note": "Reviewed English stage 2 version selected as canonical import source."
+    },
+    {
+      "file_name": "Eng - STAGE 2 (LEVEL 31-60).docx",
+      "language_code": "en",
+      "language_name": "English",
+      "stage_number": 2,
+      "level_start": 31,
+      "level_end": 60,
+      "include": false,
+      "note": "Skipped because REVIEWED_SID is treated as the canonical reviewed version."
+    },
+    {
+      "file_name": "Eng - STAGE 3 (LEVELS 61-100).pdf",
+      "language_code": "en",
+      "language_name": "English",
+      "stage_number": 3,
+      "level_start": 61,
+      "level_end": 100,
+      "include": true,
+      "note": ""
+    },
+    {
+      "file_name": "Janpanes - ステージ1(レベル1-30).docx",
+      "language_code": "ja",
+      "language_name": "Japanese",
+      "stage_number": 1,
+      "level_start": 1,
+      "level_end": 30,
+      "include": true,
+      "note": ""
+    },
+    {
+      "file_name": "Janpanes - ステージ2(レベル31-60).docx",
+      "language_code": "ja",
+      "language_name": "Japanese",
+      "stage_number": 2,
+      "level_start": 31,
+      "level_end": 60,
+      "include": true,
+      "note": ""
+    },
+    {
+      "file_name": "Janpanes - ステージ3(レベル61-100).docx",
+      "language_code": "ja",
+      "language_name": "Japanese",
+      "stage_number": 3,
+      "level_start": 61,
+      "level_end": 100,
+      "include": true,
+      "note": ""
+    }
+  ],
+  "included_files": [
+    "Chinese - level 1-30.docx",
+    "Chinese - level 31-60.docx",
+    "chinese level 61-100.docx",
+    "Eng - STAGE 1 (LEVELS 1-30).docx",
+    "Eng - STAGE 2 (LEVEL 31-60) REVIEWED_SID.docx",
+    "Eng - STAGE 3 (LEVELS 61-100).pdf",
+    "Janpanes - ステージ1(レベル1-30).docx",
+    "Janpanes - ステージ2(レベル31-60).docx",
+    "Janpanes - ステージ3(レベル61-100).docx"
+  ],
+  "skipped_files": [
+    {
+      "file_name": "Eng - STAGE 2 (LEVEL 31-60).docx",
+      "language_code": "en",
+      "language_name": "English",
+      "stage_number": 2,
+      "level_start": 31,
+      "level_end": 60,
+      "include": false,
+      "note": "Skipped because REVIEWED_SID is treated as the canonical reviewed version."
+    }
+  ],
+  "paragraphs_by_file": {
+    "Chinese - level 1-30.docx": 396,
+    "Chinese - level 31-60.docx": 260,
+    "chinese level 61-100.docx": 140,
+    "Eng - STAGE 1 (LEVELS 1-30).docx": 104,
+    "Eng - STAGE 2 (LEVEL 31-60) REVIEWED_SID.docx": 236,
+    "Eng - STAGE 2 (LEVEL 31-60).docx": 236,
+    "Eng - STAGE 3 (LEVELS 61-100).pdf": 1156,
+    "Janpanes - ステージ1(レベル1-30).docx": 143,
+    "Janpanes - ステージ2(レベル31-60).docx": 106,
+    "Janpanes - ステージ3(レベル61-100).docx": 136
+  },
+  "total_lessons": 300,
+  "total_content_blocks": 2374,
+  "by_language": {
+    "en": {
+      "lessons": 100,
+      "content_blocks": 1386
+    },
+    "ja": {
+      "lessons": 100,
+      "content_blocks": 292
+    },
+    "zh": {
+      "lessons": 100,
+      "content_blocks": 696
+    }
+  }
+}

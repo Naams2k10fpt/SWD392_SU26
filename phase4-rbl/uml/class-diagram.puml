@@ -1,0 +1,95 @@
+@startuml
+skinparam classAttributeIconSize 0
+
+class User {
+  +UUID id
+  +String email
+  +String displayName
+  +String passwordHash
+  +UserStatus status
+  +Instant createdAt
+}
+
+enum RoleName {
+  ANONYMOUS
+  PRO
+  SUPER
+}
+
+class Role {
+  +UUID id
+  +RoleName name
+  +String description
+}
+
+class UserRole {
+  +UUID userId
+  +UUID roleId
+}
+
+class AuthToken {
+  +String accessToken
+  +Instant expiresAt
+}
+
+class Language {
+  +UUID id
+  +String code
+  +String name
+}
+
+class Stage {
+  +UUID id
+  +UUID languageId
+  +int number
+  +String title
+}
+
+class Level {
+  +UUID id
+  +UUID stageId
+  +int number
+  +String title
+}
+
+class Lesson {
+  +UUID id
+  +UUID levelId
+  +int sequence
+  +String title
+}
+
+class ContentBlock {
+  +UUID id
+  +UUID lessonId
+  +String blockType
+  +String text
+  +int sortOrder
+}
+
+class SourceDocument {
+  +UUID id
+  +String fileName
+  +String languageCode
+  +String checksum
+  +ImportStatus status
+}
+
+class WordImportJob {
+  +UUID id
+  +UUID sourceDocumentId
+  +Instant startedAt
+  +Instant completedAt
+  +ImportStatus status
+}
+
+User "1" -- "0..*" UserRole
+Role "1" -- "0..*" UserRole
+User ..> AuthToken : receives
+Language "1" -- "1..*" Stage
+Stage "1" -- "1..*" Level
+Level "1" -- "0..*" Lesson
+Lesson "1" -- "0..*" ContentBlock
+SourceDocument "1" -- "0..*" WordImportJob
+WordImportJob ..> ContentBlock : creates
+@enduml
