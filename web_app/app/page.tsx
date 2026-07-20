@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Route =
   | "/login"
@@ -40,7 +40,21 @@ type Participant = {
   micEnabled: boolean;
   joinedAt: string;
 };
-type Room = { roomId: string; createdAt: string; users: Participant[]; raisedHands: string[]; languageCode?: string; levelNumber?: number };
+type Room = { roomId: string; title?: string; createdAt: string; users: Participant[]; raisedHands: string[]; languageCode?: string; levelNumber?: number };
+type ChatMessage = {
+  id: string;
+  userId: string;
+  displayName: string;
+  message: string;
+  createdAt: string;
+};
+type RecordingState = {
+  status: 'RECORDING' | 'SAVED' | 'NONE' | 'ERROR';
+  startedBy?: string;
+  recordingId?: string;
+  audioUrl?: string;
+  error?: string;
+};
 type RoomInfo = { roomCode: string; title: string; languageCode: string; levelNumber: number; participantCount?: number; status: string };
 type Socket = {
   on<T extends unknown[]>(event: string, callback: (...args: T) => void): Socket;
@@ -602,6 +616,9 @@ function RoomView({ session }: { session: Session }) {
   const [latency, setLatency] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [showBrowser, setShowBrowser] = useState(true);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [recording, setRecording] = useState<RecordingState>({ status: 'NONE' });
 
   useEffect(() => {
     let active = true;
@@ -613,6 +630,12 @@ function RoomView({ session }: { session: Session }) {
       liveSocket.on("disconnect", () => { setConnected(false); setJoined(false); });
       liveSocket.on("connect_error", () => setError("Không thể kết nối Realtime service"));
       liveSocket.on("room:state", (state: Room) => setRoom(state));
+      liveSocket.on("chat:message", (msg: ChatMessage) => {
+        setMessages(prev => [...prev, msg]);
+      });
+      liveSocket.on("recording:update", (state: RecordingState) => {
+        setRecording(prev => ({ ...prev, ...state, audioUrl: state.status === 'RECORDING' ? undefined : prev.audioUrl }));
+      });
       setSocket(liveSocket);
     };
     if (window.io) connect();
@@ -641,6 +664,55 @@ function RoomView({ session }: { session: Session }) {
     const started = Date.now(); setLatency(null);
     socket?.emit("latency:ping", { clientSentAt: started }, (result: { ok: boolean }) => result?.ok && setLatency(Date.now() - started));
   }
+  function sendChat(event: FormEvent) {
+    event.preventDefault();
+    if (!socket || !chatInput.trim() || !joined) return;
+    socket.emit("chat:send", {
+      roomId,
+      userId: session.user.id,
+      displayName: session.user.displayName,
+      message: chatInput.trim(),
+    }, (result: { ok: boolean }) => {
+      if (result?.ok) setChatInput("");
+    });
+  }
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  function toggleRecording() {
+    if (recording.status === 'RECORDING') {
+      mediaRecorderRef.current?.stop();
+      mediaRecorderRef.current = null;
+      socket?.emit("recording:stop", { roomId });
+    } else {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4" });
+        audioChunksRef.current = [];
+        recorder.ondataavailable = e => {
+          if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        };
+        recorder.onstop = () => {
+          stream.getTracks().forEach(t => t.stop());
+          const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
+          const url = URL.createObjectURL(blob);
+          setRecording(prev => ({ ...prev, status: 'SAVED', audioUrl: url }));
+          audioChunksRef.current = [];
+        };
+        recorder.onerror = () => {
+          stream.getTracks().forEach(t => t.stop());
+          setRecording(prev => ({ ...prev, status: 'ERROR', error: "Lỗi khi ghi âm" }));
+        };
+        mediaRecorderRef.current = recorder;
+        recorder.start();
+        setRecording({ status: 'RECORDING' });
+        socket?.emit("recording:start", {
+          roomId, userId: session.user.id, displayName: session.user.displayName,
+        });
+      }).catch(err => {
+        setRecording({ status: 'ERROR', error: "Không thể truy cập micro: " + err.message });
+      });
+    }
+  }
 
   const participants = useMemo(() => room?.users || [], [room]);
 
@@ -652,12 +724,20 @@ function RoomView({ session }: { session: Session }) {
     <section className="panel room-controls">
       <div className="connection"><i className={connected ? "connected" : ""} />{connected ? "Đã kết nối" : "Đang kết nối"}{latency !== null && <span>{latency} ms</span>}</div>
       <span className="eyebrow">🎙️ Phòng học trực tiếp</span>
-      <h2>Tham gia phòng học</h2>
-      <form className="form compact" onSubmit={join}>
-        <label>Room ID<input value={roomId} onChange={event => setRoomId(event.target.value)} placeholder="english-level-1" required /></label>
-        <button className="primary-button" disabled={!connected}>{joined ? "Đã vào phòng" : "Join Room"}</button>
-      </form>
-      <button className="text-button" onClick={() => setShowBrowser(true)} style={{ marginTop: 8 }}>← Danh sách phòng</button>
+      <h2>{joined ? `📌 ${room?.title || roomId}` : "Tham gia phòng học"}</h2>
+      {!joined ? (
+        <>
+          <form className="form compact" onSubmit={join}>
+            <label>Room ID<input value={roomId} onChange={event => setRoomId(event.target.value)} placeholder="english-level-1" required disabled={!connected} /></label>
+            <button className="primary-button" disabled={!connected}>Join Room</button>
+          </form>
+          <button className="text-button" onClick={() => setShowBrowser(true)} style={{ marginTop: 8 }}>← Danh sách phòng</button>
+        </>
+      ) : (
+        <div style={{ margin: '12px 0', fontSize: 14, color: 'var(--muted)' }}>
+          {room?.languageCode === "en" ? "English" : room?.languageCode === "zh" ? "Chinese" : "Japanese"} · Stage {Math.ceil((room?.levelNumber || 1) / 30)} · Level {room?.levelNumber}
+        </div>
+      )}
       {error && <p className="error" role="alert">{error}</p>}
       {joined && <div className="room-actions">
         <button className={hand ? "selected" : ""} onClick={toggleHand}>✋ {hand ? "Hạ tay" : "Giơ tay"}</button>
@@ -672,7 +752,7 @@ function RoomView({ session }: { session: Session }) {
           <h2>Người tham gia</h2>
           {room?.languageCode && room?.levelNumber != null && (
             <small style={{ color: "var(--muted)", fontSize: 12, marginTop: 4, display: "block" }}>
-              {room.languageCode.toUpperCase()} · Level {room.levelNumber}
+              {room.languageCode === "en" ? "English" : room.languageCode === "zh" ? "Chinese" : "Japanese"} · Stage {Math.ceil(room.levelNumber / 30)} · Level {room.levelNumber}
             </small>
           )}
         </div>
@@ -689,6 +769,81 @@ function RoomView({ session }: { session: Session }) {
           <span title={person.micEnabled ? "Mic đang bật" : "Mic đang tắt"}>{person.micEnabled ? "🎤" : "🔇"}</span>
         </div>
       </article>)}</div> : <Empty text={joined ? "Chưa có người tham gia" : "Nhập mã phòng để xem người tham gia"} />}
+    </section>
+    <section className="panel chat-panel">
+      <div className="panel-title">
+        <div>
+          <span className="eyebrow">{recording.status === 'RECORDING' ? '🔴 Đang ghi' : recording.audioUrl ? '🎵 Đã ghi' : '💬 Chat'}</span>
+          <h2>Hội thoại</h2>
+        </div>
+        {joined && !showBrowser && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {recording.audioUrl && recording.status === 'SAVED' && (
+              <audio src={recording.audioUrl} controls style={{ height: 36, borderRadius: 6 }} />
+            )}
+            <button 
+              className={recording.status === 'RECORDING' ? 'selected record-btn' : 'record-btn'} 
+              onClick={toggleRecording}
+              style={{ 
+                background: recording.status === 'RECORDING' ? '#dc2626' : '#6366f1',
+                color: '#fff', border: 'none', borderRadius: 8, 
+                padding: '6px 14px', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6
+              }}
+            >
+              <span>{recording.status === 'RECORDING' ? '⏹' : '⏺'}</span>
+              {recording.status === 'RECORDING' ? 'Dừng' : 'Ghi âm'}
+            </button>
+          </div>
+        )}
+      </div>
+      {recording.status === 'ERROR' && recording.error && (
+        <p className="error" role="alert" style={{ margin: 8, fontSize: 13 }}>⚠️ {recording.error}</p>
+      )}
+      {joined ? (
+        <>
+          <div className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {messages.length === 0 && (
+              <div className="empty" style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>
+                <span>💬</span><p>Chưa có tin nhắn. Hãy bắt đầu cuộc hội thoại!</p>
+              </div>
+            )}
+            {messages.map(msg => (
+              <div key={msg.id} style={{ 
+                alignSelf: msg.userId === session.user.id ? 'flex-end' : 'flex-start',
+                background: msg.userId === session.user.id ? 'var(--accent)' : 'var(--surface2)',
+                color: msg.userId === session.user.id ? '#fff' : 'var(--text)',
+                borderRadius: '12px 12px 4px 12px', padding: '8px 14px',
+                maxWidth: '80%', fontSize: 14
+              }}>
+                {msg.userId !== session.user.id && (
+                  <small style={{ fontWeight: 600, display: 'block', marginBottom: 2, opacity: 0.8 }}>{msg.displayName}</small>
+                )}
+                <p style={{ margin: 0 }}>{msg.message}</p>
+                <small style={{ opacity: 0.6, fontSize: 10, display: 'block', marginTop: 2 }}>
+                  {new Date(msg.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                </small>
+              </div>
+            ))}
+            <div ref={el => el?.scrollIntoView({ behavior: 'smooth' })} />
+          </div>
+          <form onSubmit={sendChat} style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid var(--border)' }}>
+            <input 
+              value={chatInput} 
+              onChange={e => setChatInput(e.target.value)}
+              placeholder="Nhập tin nhắn..." 
+              style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+            />
+            <button type="submit" style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>
+              Gửi
+            </button>
+          </form>
+        </>
+      ) : (
+        <div className="empty" style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>
+          <span>💬</span><p>Tham gia phòng để chat và ghi âm</p>
+        </div>
+      )}
     </section>
   </div>;
 }

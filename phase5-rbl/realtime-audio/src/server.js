@@ -5,7 +5,7 @@ import mysql from "mysql2/promise";
 import { Server } from "socket.io";
 
 const port = Number(process.env.PORT || 3020);
-const databaseUrl = process.env.LUCY_DB_URL || "mysql://root@localhost:3306/lucy_phase5";
+const databaseUrl = process.env.LUCY_DB_URL || "mysql://@localhost:3306/test_lucy_phase5";
 const pool = mysql.createPool(databaseUrl);
 const app = express();
 const server = http.createServer(app);
@@ -91,7 +91,7 @@ async function serializeRoom(roomCode) {
 }
 
 app.get("/health", (_request, response) => {
-  response.json({ service: "RBL Phase 2 Real-time Audio MVP", status: "ready", storage: "MariaDB" });
+  response.json({ service: "RBL Phase 5 Real-time Audio", status: "ready", storage: "MariaDB" });
 });
 
 app.post("/agora/token", async (request, response, next) => {
@@ -190,6 +190,38 @@ app.get("/rooms/levels", async (_request, response, next) => {
   }
 });
 
+app.get("/rooms/:roomCode/messages", async (request, response, next) => {
+  try {
+    const limit = Math.min(Number(request.query.limit) || 50, 200);
+    const room = await ensureRoom(request.params.roomCode);
+    let sql = "SELECT id, user_id, display_name, message, created_at FROM room_messages WHERE room_id = ?";
+    const params = [room.id];
+    if (request.query.before) {
+      sql += " AND created_at < ?";
+      params.push(request.query.before);
+    }
+    sql += " ORDER BY created_at DESC LIMIT ?";
+    params.push(limit);
+    const [rows] = await pool.execute(sql, params);
+    response.json({ messages: rows.reverse() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/rooms/:roomCode/recordings", async (request, response, next) => {
+  try {
+    const room = await ensureRoom(request.params.roomCode);
+    const [rows] = await pool.execute(
+      "SELECT id, started_by, started_by_display_name, status, storage_uri, duration_seconds, started_at, stopped_at FROM recording_logs WHERE room_id = ? ORDER BY started_at DESC",
+      [room.id]
+    );
+    response.json({ recordings: rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
 io.on("connection", (socket) => {
   socket.data.joinedRooms = new Set();
 
@@ -267,6 +299,86 @@ io.on("connection", (socket) => {
         );
       }
       acknowledge?.({ ok: true, clientSentAt, serverReceivedAt: Date.now() });
+    } catch (error) {
+      acknowledge?.({ ok: false, message: error.message });
+    }
+  });
+
+  socket.on("chat:send", async ({ roomId, userId, displayName, message }, acknowledge) => {
+    try {
+      const participant = socketParticipants.get(socket.id);
+      if (!participant || participant.roomCode !== roomId || !message?.trim()) {
+        acknowledge?.({ ok: false, message: "Join the room and provide a message" });
+        return;
+      }
+      const room = await ensureRoom(roomId);
+      await pool.execute(
+        "INSERT INTO room_messages (room_id, participant_id, user_id, display_name, message) VALUES (?, ?, ?, ?, ?)",
+        [room.id, participant.participantId, userId, displayName, message.trim()]
+      );
+      const [rows] = await pool.execute(
+        "SELECT id, user_id, display_name, message, created_at FROM room_messages WHERE room_id = ? ORDER BY created_at DESC LIMIT 1",
+        [room.id]
+      );
+      const msg = rows[0];
+      io.to(roomId).emit("chat:message", {
+        id: msg.id,
+        userId: msg.user_id,
+        displayName: msg.display_name,
+        message: msg.message,
+        createdAt: msg.created_at,
+      });
+      acknowledge?.({ ok: true });
+    } catch (error) {
+      acknowledge?.({ ok: false, message: error.message });
+    }
+  });
+
+  socket.on("recording:start", async ({ roomId, userId, displayName }, acknowledge) => {
+    try {
+      const participant = socketParticipants.get(socket.id);
+      if (!participant || participant.roomCode !== roomId) {
+        acknowledge?.({ ok: false, message: "Join the room before recording" });
+        return;
+      }
+      const room = await ensureRoom(roomId);
+      const [active] = await pool.execute(
+        "SELECT id FROM recording_logs WHERE room_id = ? AND status = 'RECORDING' LIMIT 1",
+        [room.id]
+      );
+      if (active.length > 0) {
+        acknowledge?.({ ok: false, message: "A recording is already in progress" });
+        return;
+      }
+      await pool.execute(
+        "INSERT INTO recording_logs (room_id, started_by, started_by_display_name, status) VALUES (?, ?, ?, 'RECORDING')",
+        [room.id, userId, displayName]
+      );
+      const [rows] = await pool.execute(
+        "SELECT id FROM recording_logs WHERE room_id = ? AND status = 'RECORDING' ORDER BY started_at DESC LIMIT 1",
+        [room.id]
+      );
+      io.to(roomId).emit("recording:update", { status: "RECORDING", startedBy: displayName, recordingId: rows[0].id });
+      acknowledge?.({ ok: true, recordingId: rows[0].id });
+    } catch (error) {
+      acknowledge?.({ ok: false, message: error.message });
+    }
+  });
+
+  socket.on("recording:stop", async ({ roomId }, acknowledge) => {
+    try {
+      const participant = socketParticipants.get(socket.id);
+      if (!participant || participant.roomCode !== roomId) {
+        acknowledge?.({ ok: false, message: "Join the room first" });
+        return;
+      }
+      const room = await ensureRoom(roomId);
+      await pool.execute(
+        "UPDATE recording_logs SET status = 'SAVED', stopped_at = CURRENT_TIMESTAMP WHERE room_id = ? AND status = 'RECORDING'",
+        [room.id]
+      );
+      io.to(roomId).emit("recording:update", { status: "SAVED" });
+      acknowledge?.({ ok: true });
     } catch (error) {
       acknowledge?.({ ok: false, message: error.message });
     }
