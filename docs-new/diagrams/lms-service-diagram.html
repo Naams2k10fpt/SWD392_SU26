@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="LMS Service — Java Console state pattern engine, stage transitions, mentor dashboard, learner progress. Vietnamese.">
+<title>LMS Service — Architecture</title>
+<script>
+  (function () {
+    const saved = localStorage.getItem('theme');
+    const dark = saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', dark);
+  })();
+</script>
+<style>
+  :root {
+    --bg: #FAF9F5; --surface: #FFFFFF; --surface2: #F0EEE6;
+    --ink: #141413; --body: #3D3D3A; --muted: #87867F;
+    --line: #D1CFC5; --line-soft: #E6E3DA;
+    --clay: #D97757; --clay-soft: rgba(217,119,87,0.10);
+    --olive: #788C5D; --olive-soft: rgba(120,140,93,0.12);
+    --gold: #C9A45C; --blue: #5B7E96;
+    --zone: rgba(20,20,19,0.025); --zone-line: #D1CFC5;
+    --serif: ui-serif, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  html.dark {
+    --bg: #141413; --surface: #1F1F1D; --surface2: #2A2A28;
+    --ink: #FAF9F5; --body: #D1CFC5; --muted: #87867F;
+    --line: #3D3D3A; --line-soft: #2A2A28;
+    --clay: #E48A6E; --clay-soft: rgba(228,138,110,0.14);
+    --olive: #9DB07C; --olive-soft: rgba(157,176,124,0.16);
+    --gold: #D4B36F; --blue: #7FA3BC;
+    --zone: rgba(250,249,245,0.03); --zone-line: #3D3D3A;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--body); font-family: var(--sans);
+    -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* ── top bar ─────────────────────────────── */
+  .bar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 20px; border-bottom: 1px solid var(--line-soft); flex: none;
+  }
+  .bar h1 { font-family: var(--serif); font-weight: 500; font-size: 19px; color: var(--ink); letter-spacing: -0.01em; }
+  .bar .sub { font-family: var(--mono); font-size: 10.5px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+  .spacer { flex: 1; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em;
+    padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px;
+    background: transparent; color: var(--muted); cursor: pointer; transition: all .15s ease;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--muted); }
+  .chip.on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+  #themeToggle {
+    font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px;
+    background: transparent; color: var(--muted); cursor: pointer;
+  }
+  #themeToggle:hover { color: var(--ink); border-color: var(--muted); }
+
+  /* ── stage ───────────────────────────────── */
+  .stage { flex: 1; position: relative; min-height: 0; }
+
+  /* canvas container (zoom/pan) */
+  .canvas-container {
+    position: absolute; inset: 0; overflow: hidden;
+    cursor: grab;
+  }
+  .canvas-container:active { cursor: grabbing; }
+  .stage svg { display: block; overflow: visible; user-select: none; }
+
+  /* zoom controls */
+  .zoom-controls {
+    position: absolute; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 10;
+  }
+  .zoom-btn {
+    width: 36px; height: 36px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; color: var(--ink);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05); transition: all 0.15s ease;
+  }
+  .zoom-btn:hover { border-color: var(--muted); transform: translateY(-1px); }
+
+  /* zones */
+  .zone rect { fill: var(--zone); stroke: var(--zone-line); stroke-width: 1; stroke-dasharray: 5 5; rx: 16; }
+  .zone .ztitle { font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; fill: var(--muted); }
+  .zone .zsub { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); opacity: 0.75; }
+
+  /* nodes */
+  .node { cursor: pointer; }
+  .node rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; rx: 10; transition: stroke .15s ease, filter .15s ease; }
+  .node:hover rect { stroke: var(--muted); }
+  .node.sel rect { stroke: var(--clay) !important; stroke-width: 2; }
+  .node .t  { font-family: var(--sans); font-size: 14.5px; font-weight: 600; fill: var(--ink); pointer-events: none; }
+  .node .m  { font-family: var(--mono); font-size: 11px; fill: var(--muted); pointer-events: none; }
+  .node .k  { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; fill: var(--clay); pointer-events: none; }
+  .node.gate rect { fill: var(--clay-soft); stroke: var(--clay); }
+  .node.store rect { fill: var(--surface2); }
+  .node.do rect { fill: var(--olive-soft); stroke: var(--olive); }
+  .node.ext rect { stroke-dasharray: 6 3; }
+
+  /* edges */
+  .edge { stroke: var(--muted); stroke-width: 1.6; fill: none; marker-end: url(#a-mut); transition: opacity .2s ease, stroke .2s ease; }
+  .edge.dash { stroke-dasharray: 5 4; }
+  .edge.ws { stroke-width: 2; }
+  .elbl { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); transition: opacity .2s ease; }
+
+  /* flow highlighting */
+  .stage.flowing .edge { opacity: 0.13; }
+  .stage.flowing .elbl { opacity: 0.13; }
+  .stage.flowing .node { opacity: 0.30; }
+  .stage.flowing .zone { opacity: 0.45; }
+  .stage.flowing .edge.lit {
+    opacity: 1; stroke: var(--clay); marker-end: url(#a-clay);
+    stroke-dasharray: 7 5; animation: march 0.9s linear infinite;
+  }
+  .stage.flowing .elbl.lit { opacity: 1; fill: var(--clay); }
+  .stage.flowing .node.lit { opacity: 1; }
+  .stage.flowing .node.lit rect { stroke: var(--clay); }
+  @keyframes march { to { stroke-dashoffset: -12; } }
+  @media (prefers-reduced-motion: reduce) { .stage.flowing .edge.lit { animation: none; } }
+
+  .badge { font-family: var(--mono); font-size: 11px; font-weight: 700; }
+  .badge circle { fill: var(--clay); }
+  .badge text { fill: var(--bg); }
+  .stage:not(.flowing) .badge { display: none; }
+
+  /* ── floating cards ──────────────────────── */
+  .card {
+    position: absolute; max-width: 360px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.08);
+  }
+  #detail { right: 16px; bottom: 16px; width: 340px; }
+  #detail h3 { font-family: var(--serif); font-weight: 500; font-size: 17px; color: var(--ink); margin-bottom: 2px; }
+  #detail .meta { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-bottom: 8px; }
+  #detail p { font-size: 12.5px; line-height: 1.55; }
+  #detail p code, #flowcap code { font-family: var(--mono); font-size: 11px; color: var(--clay); }
+  #flowcap { left: 16px; bottom: 16px; max-width: 460px; display: none; }
+  #flowcap.show { display: block; }
+  #flowcap .fname { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--clay); margin-bottom: 6px; }
+  #flowcap ol { margin-left: 18px; }
+  #flowcap li { font-size: 12.5px; line-height: 1.55; }
+  .src { position: absolute; top: 10px; right: 16px; font-family: var(--mono); font-size: 10px; color: var(--muted); opacity: 0.8; }
+  @media (max-width: 880px) {
+    body { overflow: auto; }
+    .stage { min-height: 70vh; }
+    #detail { position: static; width: auto; margin: 10px 16px; }
+    #flowcap { position: static; margin: 0 16px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div>
+    <h1>LMS Service — Architecture</h1>
+    <div class="sub">STATE PATTERN · JAVA CONSOLE</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="chips" id="chips">
+    <button class="chip on" data-flow="all">All</button>
+    <button class="chip" data-flow="dashboard">Run Dashboard</button>
+    <button class="chip" data-flow="transition">Transition Flow</button>
+  </div>
+  <button id="themeToggle">☾</button>
+</div>
+
+<div class="stage" id="stage">
+  <div class="canvas-container" id="canvas-container">
+  <svg viewBox="0 0 1560 980" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <marker id="a-mut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"/>
+    </marker>
+    <marker id="a-clay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--clay)"/>
+    </marker>
+  </defs>
+  <g id="viewport">
+
+  <!-- ── zones ─────────────────────────────── -->
+  <g class="zone" id="z-console">
+    <rect x="40" y="100" width="240" height="620"/>
+    <text class="ztitle" x="60" y="130">Console</text>
+    <text class="zsub" x="60" y="148">Java Spring Boot App</text>
+  </g>
+  <g class="zone" id="z-engine">
+    <rect x="310" y="100" width="280" height="620"/>
+    <text class="ztitle" x="330" y="130">State Engine</text>
+    <text class="zsub" x="330" y="148">State transition engine</text>
+  </g>
+  <g class="zone" id="z-dash">
+    <rect x="620" y="100" width="280" height="620"/>
+    <text class="ztitle" x="640" y="130">Dashboard</text>
+    <text class="zsub" x="640" y="148">Mentor &amp; learner tracking</text>
+  </g>
+  <g class="zone" id="z-stores">
+    <rect x="930" y="100" width="220" height="620"/>
+    <text class="ztitle" x="950" y="130">Data Stores</text>
+    <text class="zsub" x="950" y="148">MariaDB 12.2</text>
+  </g>
+
+  <!-- ── edges ─────────────────────────────── -->
+  <path class="edge" id="e-run-dash"       d="M 160,200 L 330,200"/>
+  <path class="edge" id="e-dash-stage"     d="M 470,200 C 545,200 545,200 640,200"/>
+  <path class="edge" id="e-warmup-tut"     d="M 400,320 L 400,370"/>
+  <path class="edge" id="e-tut-guided"     d="M 400,370 C 440,370 440,420 400,420"/>
+  <path class="edge davsh" id="e-guided-peer"  d="M 400,420 C 440,420 440,470 400,470"/>
+  <path class="edge" id="e-peer-reflect"   d="M 400,470 L 400,520"/>
+  <path class="edge" id="e-state-db"       d="M 470,550 C 700,550 700,240 950,240"/>
+  <path class="edge" id="e-dash-db"        d="M 780,240 L 950,240"/>
+  <path class="edge" id="e-mentor-dash"    d="M 640,200 L 640,260"/>
+  <path class="edge" id="e-learner-track"  d="M 640,260 L 640,340"/>
+  <path class="edge" id="e-tracker-db"     d="M 780,340 L 950,340"/>
+
+  <!-- edge labels -->
+  <text class="elbl" data-e="e-run-dash"     x="245" y="192">runDashboard()</text>
+  <text class="elbl" data-e="e-dash-stage"   x="555" y="192">initStages()</text>
+  <text class="elbl" data-e="e-warmup-tut"     x="410" y="350">Transition WarmUp → GuidedPractice</text>
+  <text class="elbl" data-e="e-tut-guided"     x="410" y="400">Transition → PeerExchange</text>
+  <text class="elbl" data-e="e-guided-peer"  x="410" y="450">Transition → Reflection</text>
+  <text class="elbl" data-e="e-peer-reflect" x="410" y="500">Finish</text>
+  <text class="elbl" data-e="e-state-db"     x="720" y="400" text-anchor="middle">session_state</text>
+  <text class="elbl" data-e="e-dash-db"      x="865" y="232" text-anchor="middle">sessions</text>
+  <text class="elbl" data-e="e-mentor-dash"  x="650" y="235">Mentor Dashboard</text>
+  <text class="elbl" data-e="e-learner-track" x="650" y="305">Learner Tracker</text>
+  <text class="elbl" data-e="e-tracker-db"   x="865" y="332" text-anchor="middle">learner_progress</text>
+
+  <!-- ── nodes: console ────────────────────── -->
+  <g class="node gate" data-k="lms_app">
+    <rect x="60" y="170" width="200" height="60"/>
+    <text class="t" x="80" y="198">LmsApplication</text>
+    <text class="m" x="80" y="216">Main · Spring Boot Console</text>
+  </g>
+
+  <!-- ── nodes: state engine ───────────────── -->
+  <g class="node do" data-k="stage_engine">
+    <rect x="330" y="170" width="240" height="60"/>
+    <text class="t" x="350" y="198">StageTransitionEngine</text>
+    <text class="m" x="350" y="216">Orchestrate stage transitions</text>
+  </g>
+  <g class="node" data-k="warmup">
+    <rect x="310" y="320" width="180" height="50"/>
+    <text class="t" x="330" y="345">WarmUpState</text>
+    <text class="m" x="330" y="360">Warm-up</text>
+  </g>
+  <g class="node" data-k="guided">
+    <rect x="310" y="370" width="180" height="50"/>
+    <text class="t" x="330" y="395">GuidedPracticeState</text>
+    <text class="m" x="330" y="410">Guided practice</text>
+  </g>
+  <g class="node" data-k="peer">
+    <rect x="310" y="420" width="180" height="50"/>
+    <text class="t" x="330" y="445">PeerExchangeState</text>
+    <text class="m" x="330" y="460">Peer exchange</text>
+  </g>
+  <g class="node" data-k="reflect">
+    <rect x="310" y="470" width="180" height="50"/>
+    <text class="t" x="330" y="495">ReflectionState</text>
+    <text class="m" x="330" y="510">Reflection &amp; summary</text>
+  </g>
+
+  <!-- ── nodes: dashboard ──────────────────── -->
+  <g class="node do" data-k="mentor_dash">
+    <rect x="640" y="200" width="240" height="60"/>
+    <text class="t" x="660" y="228">MentorDashboard</text>
+    <text class="m" x="660" y="246">View group progress</text>
+  </g>
+  <g class="node do" data-k="learner_tracker">
+    <rect x="640" y="340" width="240" height="60"/>
+    <text class="t" x="660" y="368">Learner Tracker</text>
+    <text class="m" x="660" y="386">Track individual learners</text>
+  </g>
+
+  <!-- ── nodes: data stores ────────────────── -->
+  <g class="node store" data-k="mariadb">
+    <rect x="950" y="200" width="180" height="90"/>
+    <text class="t" x="970" y="230">MariaDB (lucy_lms)</text>
+    <text class="m" x="970" y="252">sessions · session_state</text>
+    <text class="m" x="970" y="270">learner_progress</text>
+  </g>
+  </g>
+  </svg>
+  </div> <!-- /canvas-container -->
+
+  <div class="zoom-controls">
+    <button class="zoom-btn" id="zoom-in">+</button>
+    <button class="zoom-btn" id="zoom-reset">⟲</button>
+    <button class="zoom-btn" id="zoom-out">-</button>
+  </div>
+
+  <div class="src">LUCY SWD392/lms-service · State Pattern Engine</div>
+
+  <div class="card" id="flowcap">
+    <div class="fname" id="f-name"></div>
+    <ol id="f-steps"></ol>
+  </div>
+
+  <div class="card" id="detail">
+    <h3 id="d-title">Click a node</h3>
+    <div class="meta" id="d-meta">Node Details</div>
+    <p id="d-body">Mỗi ô đều có thể click. Click các luồng phía trên để xem đường đi: Dashboard, Chuyển tiếp giai đoạn.</p>
+  </div>
+</div>
+<script>
+const DETAIL = {
+  lms_app: { t: "LmsApplication", m: "Spring Boot Console App", b: "Ứng dụng console Java Spring Boot. Gọi <code>MentorDashboard.run()</code> để khởi tạo và hiển thị tiến độ học tập." },
+  stage_engine: { t: "StageTransitionEngine", m: "State Pattern Engine", b: "Máy trạng thái trung tâm. Khởi tạo các giai đoạn học tập: WarmUp → GuidedPractice → PeerExchange → Reflection. Dùng <code>SessionState</code> để theo dõi trạng thái từng session." },
+  warmup: { t: "WarmUpState", m: "Stage 1", b: "Giai đoạn khởi động. Học viên làm quen với chủ đề và thiết lập mục tiêu cho buổi học." },
+  guided: { t: "GuidedPracticeState", m: "Stage 2", b: "Giai đoạn thực hành có hướng dẫn. Mentor hướng dẫn học viên qua các bài tập thực hành." },
+  peer: { t: "PeerExchangeState", m: "Stage 3", b: "Giai đoạn trao đổi bạn học. Học viên làm việc nhóm, chia sẻ kiến thức và giải quyết vấn đề cùng nhau." },
+  reflect: { t: "ReflectionState", m: "Stage 4", b: "Giai đoạn suy ngẫm. Học viên tổng kết bài học, đánh giá và nhận phản hồi từ mentor." },
+  mentor_dash: { t: "MentorDashboard", m: "Mentor Dashboard", b: "Hiển thị tổng quan tiến độ của tất cả nhóm. Đọc dữ liệu từ bảng <code>sessions</code> và <code>session_state</code>." },
+  learner_tracker: { t: "Learner Tracker", m: "Learner Tracker", b: "Theo dõi tiến độ từng học viên qua các giai đoạn. Ghi nhận kết quả vào bảng <code>learner_progress</code>." },
+  mariadb: { t: "MariaDB (lucy_lms)", m: "Relational Database (Port 3306)", b: "MariaDB 12.2 lưu <code>sessions</code> (phiên học), <code>session_state</code> (trạng thái giai đoạn), <code>learner_progress</code> (tiến độ học viên)." }
+};
+
+const FLOWS = {
+  dashboard: {
+    name: "Chạy Dashboard",
+    edges: ["e-run-dash","e-dash-stage","e-mentor-dash","e-dash-db","e-learner-track","e-tracker-db"],
+    nodes: ["lms_app","stage_engine","mentor_dash","learner_tracker","mariadb"],
+    steps: [
+      "<code>LmsApplication</code> gọi <code>runDashboard()</code> để khởi động.",
+      "<code>StageTransitionEngine</code> khởi tạo các giai đoạn học tập.",
+      "<code>MentorDashboard</code> đọc sessions từ MariaDB để hiển thị.",
+      "<code>Learner Tracker</code> theo dõi tiến độ từng học viên.",
+      "Dashboard hiển thị tổng quan cho mentor."
+    ]
+  },
+  transition: {
+    name: "Luồng Chuyển Tiếp",
+    edges: ["e-warmup-tut","e-tut-guided","e-guided-peer","e-peer-reflect","e-state-db"],
+    nodes: ["warmup","guided","peer","reflect","mariadb"],
+    steps: [
+      "Bắt đầu với <code>WarmUpState</code> — học viên làm quen chủ đề.",
+      "Chuyển sang <code>GuidedPracticeState</code> — thực hành có hướng dẫn.",
+      "Chuyển sang <code>PeerExchangeState</code> — trao đổi nhóm.",
+      "Kết thúc với <code>ReflectionState</code> — tổng kết và đánh giá.",
+      "Mỗi bước chuyển đều được ghi vào <code>session_state</code> trong MariaDB."
+    ]
+  }
+};
+
+const stage = document.getElementById('stage');
+const nodes = document.querySelectorAll('.node');
+const edges = document.querySelectorAll('.edge');
+const elbls = document.querySelectorAll('.elbl');
+const chips = document.querySelectorAll('.chip');
+const fcap = document.getElementById('flowcap');
+
+function setFlow(key) {
+  chips.forEach(c => c.classList.toggle('on', c.dataset.flow === key));
+  edges.forEach(e => e.classList.remove('lit'));
+  elbls.forEach(l => l.classList.remove('lit'));
+  nodes.forEach(n => n.classList.remove('lit'));
+  if (key === 'all') { stage.classList.remove('flowing'); fcap.classList.remove('show'); return; }
+  const f = FLOWS[key];
+  if (!f) return;
+  stage.classList.add('flowing');
+  f.edges.forEach(id => document.getElementById(id)?.classList.add('lit'));
+  elbls.forEach(l => { if (f.edges.includes(l.dataset.e)) l.classList.add('lit'); });
+  f.nodes.forEach(k => document.querySelector(".node[data-k='" + k + "']")?.classList.add('lit'));
+  document.getElementById('f-name').textContent = f.name;
+  document.getElementById('f-steps').innerHTML = f.steps.map(s => "<li>" + s + "</li>").join('');
+  fcap.classList.add('show');
+}
+chips.forEach(c => c.addEventListener('click', () => setFlow(c.dataset.flow)));
+
+nodes.forEach(n => n.addEventListener('click', () => {
+  nodes.forEach(x => x.classList.remove('sel'));
+  n.classList.add('sel');
+  const d = DETAIL[n.dataset.k];
+  if (!d) return;
+  document.getElementById('d-title').textContent = d.t;
+  document.getElementById('d-meta').textContent = d.m;
+  document.getElementById('d-body').innerHTML = d.b;
+}));
+
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const dark = !document.documentElement.classList.contains('dark');
+  document.documentElement.classList.toggle('dark', dark);
+  localStorage.setItem('theme', dark ? 'dark' : 'light');
+});
+
+// Zoom and Pan Logic
+let scale = 1;
+let translateX = 0;
+let translateY = 0;
+let isDragging = false;
+let startX, startY;
+const container = document.getElementById('canvas-container');
+const viewport = document.getElementById('viewport');
+
+function updateTransform() {
+  viewport.setAttribute('transform', `translate(${translateX}, ${translateY}) scale(${scale})`);
+}
+
+container.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.node') || e.target.closest('.zoom-controls') || e.target.closest('.bottom-panel') || e.target.closest('.card')) return;
+  isDragging = true;
+  startX = e.clientX - translateX;
+  startY = e.clientY - translateY;
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  translateX = e.clientX - startX;
+  translateY = e.clientY - startY;
+  updateTransform();
+});
+
+window.addEventListener('mouseup', () => { isDragging = false; });
+window.addEventListener('mouseleave', () => { isDragging = false; });
+
+container.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const scaleChange = e.deltaY > 0 ? 0.9 : 1.1;
+  const newScale = Math.min(Math.max(0.3, scale * scaleChange), 3);
+  
+  const rect = container.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const mouseY = e.clientY - rect.top;
+  
+  translateX = mouseX - (mouseX - translateX) * (newScale / scale);
+  translateY = mouseY - (mouseY - translateY) * (newScale / scale);
+  scale = newScale;
+  
+  updateTransform();
+}, { passive: false });
+
+// Auto center on load
+setTimeout(() => {
+  const rect = container.getBoundingClientRect();
+  const svgW = 1560;
+  const svgH = 980;
+  scale = rect.width < svgW ? rect.width / (svgW + 100) : 1; 
+  translateX = (rect.width - svgW * scale) / 2; 
+  translateY = (rect.height - svgH * scale) / 2; 
+  updateTransform();
+}, 50);
+
+document.getElementById('zoom-in').addEventListener('click', () => { scale = Math.min(scale * 1.2, 3); updateTransform(); });
+document.getElementById('zoom-out').addEventListener('click', () => { scale = Math.max(scale * 0.8, 0.3); updateTransform(); });
+document.getElementById('zoom-reset').addEventListener('click', () => { 
+  const rect = container.getBoundingClientRect();
+  const svgW = 1560;
+  const svgH = 980;
+  scale = rect.width < svgW ? rect.width / (svgW + 100) : 1; 
+  translateX = (rect.width - svgW * scale) / 2; 
+  translateY = (rect.height - svgH * scale) / 2; 
+  updateTransform();
+});
+</script>
+</body>
+</html>

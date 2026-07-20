@@ -1,0 +1,601 @@
+# API Specification — LUCY SWD392
+
+| **Tên dự án** | LUCY (Language Unity & Collaborative Youth) |
+|---|---|
+| **Phiên bản** | 1.0.0 |
+| **Ngày tạo** | 2026-06-29 |
+| **Loại tài liệu** | API Specification |
+| **Base URLs** | Auth: http://localhost:5000, Wallet: http://localhost:5040, Realtime: http://localhost:3020 |
+
+---
+
+## Mục lục
+
+- [1. Auth Service (port 5000)](#1-auth-service-port-5000)
+- [2. Wallet Service (port 5040)](#2-wallet-service-port-5040)
+- [3. Realtime Service (port 3020)](#3-realtime-service-port-3020)
+- [4. Java LMS (Console)](#4-java-lms-console)
+- [5. Error Codes](#5-error-codes)
+- [6. Authentication Flow](#6-authentication-flow)
+
+---
+
+## 1. Auth Service (port 5000)
+
+Công nghệ: ASP.NET Core Minimal API (.NET 10)
+Base URL: `http://localhost:5000`
+
+### Endpoints
+
+| Method | Endpoint | Auth | Request Body | Response | Mô tả |
+|---|---|---|---|---|---|
+| GET | / | No | — | `{service, status, storage}` | Health check |
+| POST | /auth/register | No | `{email, password, displayName, role}` | 201 `{accessToken, expiresAt, user}` | Đăng ký tài khoản |
+| POST | /auth/login | No | `{email, password}` | 200 `{accessToken, expiresAt, user}` | Đăng nhập |
+| GET | /auth/me | Bearer JWT | — | 200 `{id, email, role}` | Xem thông tin user |
+
+### Chi tiết Endpoint
+
+#### GET / — Health Check
+
+```
+GET http://localhost:5000/
+```
+
+Response (200):
+
+```json
+{
+  "service": "LUCY Phase 1 Auth API",
+  "status": "ready",
+  "storage": "MariaDB"
+}
+```
+
+#### POST /auth/register — Register
+
+```
+POST http://localhost:5000/auth/register
+Content-Type: application/json
+
+{
+  "email": "mentor@lucy.local",
+  "password": "Mentor@123",
+  "displayName": "Mentor One",
+  "role": "Pro"
+}
+```
+
+Response (201):
+
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiJ9...",
+  "expiresAt": 1719600000,
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "email": "mentor@lucy.local",
+    "displayName": "Mentor One",
+    "role": "Pro"
+  }
+}
+```
+
+Validation:
+
+| Field | Yêu cầu | Ghi chú |
+|---|---|---|
+| email | Bắt buộc, không được rỗng | Trim + lowercase |
+| password | Bắt buộc, không được rỗng | Hash bằng Identity PasswordHasher |
+| displayName | Bắt buộc, không được rỗng | Trim |
+| role | Không bắt buộc | Mặc định: Anonymous |
+
+Error responses:
+
+| Status | Ý nghĩa |
+|---|---|
+| 400 | Thiếu field (email, password, displayName) |
+| 409 | Email đã tồn tại |
+
+#### POST /auth/login — Login
+
+```
+POST http://localhost:5000/auth/login
+Content-Type: application/json
+
+{
+  "email": "mentor@lucy.local",
+  "password": "Mentor@123"
+}
+```
+
+Response (200):
+
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiJ9...",
+  "expiresAt": 1719600000,
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "email": "mentor@lucy.local",
+    "displayName": "Mentor One",
+    "role": "Pro"
+  }
+}
+```
+
+Error responses:
+
+| Status | Ý nghĩa |
+|---|---|
+| 401 | Sai email hoặc password |
+
+#### GET /auth/me — Current User
+
+```
+GET http://localhost:5000/auth/me
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
+```
+
+Response (200):
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "email": "mentor@lucy.local",
+  "role": "Pro"
+}
+```
+
+Error responses:
+
+| Status | Ý nghĩa |
+|---|---|
+| 401 | Token không hợp lệ hoặc hết hạn |
+
+---
+
+## 2. Wallet Service (port 5040)
+
+Công nghệ: ASP.NET Core Minimal API + Swagger (.NET 10)
+Base URL: `http://localhost:5040`
+Swagger UI: `http://localhost:5040/swagger`
+
+### Endpoints
+
+| Method | Endpoint | Auth | Request Body | Response | Mô tả |
+|---|---|---|---|---|---|
+| GET | /health | No | — | `{service, status, storage}` | Health check |
+| GET | /wallets/{userId} | No | — | `{id, userId, balance, currencyCode}` | Xem thông tin ví (tự động tạo nếu chưa có) |
+| POST | /wallets/{userId}/top-up | No | `{amount, providerReference}` | `{wallet, message}` | Nạp tiền vào ví (transaction) |
+| POST | /gifts | No | `{fromUserId, toCreatorId, amount, message}` | `{transaction, realtimeEvent, syncRisk}` | Gửi quà tặng (transaction) |
+| GET | /gifts | No | — | `[{id, fromUserId, toCreatorId, ...}]` | Danh sách quà tặng |
+| POST | /podcasts/recordings | No | `{creatorId, roomId, title, storageUri, durationSeconds}` | 201 `{id, ...}` | Tạo podcast recording |
+| GET | /podcasts/recordings | No | — | `[{id, title, ...}]` | Danh sách recordings |
+
+### Chi tiết Endpoint
+
+#### GET /health — Health Check
+
+```
+GET http://localhost:5040/health
+```
+
+Response (200):
+
+```json
+{
+  "service": "RBL Phase 4 Wallet API",
+  "status": "ready",
+  "storage": "MariaDB"
+}
+```
+
+#### GET /wallets/{userId} — Get Wallet
+
+```
+GET http://localhost:5040/wallets/mentor-1
+```
+
+Response (200):
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440001",
+  "userId": "mentor-1",
+  "balance": 1000000.00,
+  "currencyCode": "VND"
+}
+```
+
+Ghi chú: Nếu ví chưa tồn tại, tự động tạo ví mới với balance = 0.
+
+#### POST /wallets/{userId}/top-up — Top-up
+
+```
+POST http://localhost:5040/wallets/mentor-1/top-up
+Content-Type: application/json
+
+{
+  "amount": 1000000,
+  "providerReference": "topup-mentor-1"
+}
+```
+
+Response (200):
+
+```json
+{
+  "wallet": {
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "userId": "mentor-1",
+    "balance": 2000000.00,
+    "currencyCode": "VND"
+  },
+  "message": "top-up committed to MariaDB ledger"
+}
+```
+
+Ghi chú: MariaDB transaction (BEGIN -> UPDATE balance -> INSERT wallet_transactions -> COMMIT).
+
+Error:
+
+| Status | Ý nghĩa |
+|---|---|
+| 400 | Amount <= 0 |
+
+#### POST /gifts — Send Gift
+
+```
+POST http://localhost:5040/gifts
+Content-Type: application/json
+
+{
+  "fromUserId": "learner-1",
+  "toCreatorId": "creator-1",
+  "amount": 50000,
+  "message": "Cam on bai hoc hay!"
+}
+```
+
+Response (200):
+
+```json
+{
+  "transaction": {
+    "id": "550e8400-e29b-41d4-a716-446655440002",
+    "fromWalletId": "...",
+    "toWalletId": "...",
+    "amount": 50000,
+    "message": "Cam on bai hoc hay!"
+  },
+  "realtimeEvent": "gift:sent",
+  "syncRisk": "realtime broadcast is async — client must poll or listen"
+}
+```
+
+Ghi chú: MariaDB transaction kiểm tra balance sender trước khi thực hiện.
+
+Error:
+
+| Status | Ý nghĩa |
+|---|---|
+| 400 | Amount <= 0 hoặc insufficient balance |
+
+#### GET /gifts — List Gifts
+
+```
+GET http://localhost:5040/gifts
+```
+
+Response (200):
+
+```json
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440002",
+    "fromUserId": "learner-1",
+    "toCreatorId": "creator-1",
+    "amount": 50000,
+    "message": "Cam on bai hoc hay!",
+    "realtimeEvent": "gift:sent",
+    "createdAt": "2026-06-29T10:30:00Z"
+  }
+]
+```
+
+#### POST /podcasts/recordings — Create Recording
+
+```
+POST http://localhost:5040/podcasts/recordings
+Content-Type: application/json
+
+{
+  "creatorId": "creator-1",
+  "roomId": "trial-level-1",
+  "title": "English Speaking Practice",
+  "storageUri": "https://storage.lucy.local/recordings/abc123.mp3",
+  "durationSeconds": 1800
+}
+```
+
+Response (201):
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440003",
+  "creatorId": "creator-1",
+  "roomId": "trial-level-1",
+  "title": "English Speaking Practice",
+  "storageUri": "https://storage.lucy.local/recordings/abc123.mp3",
+  "durationSeconds": 1800,
+  "createdAt": "2026-06-29T10:30:00Z"
+}
+```
+
+#### GET /podcasts/recordings — List Recordings
+
+```
+GET http://localhost:5040/podcasts/recordings
+```
+
+Response (200):
+
+```json
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440003",
+    "creatorId": "creator-1",
+    "roomId": "trial-level-1",
+    "title": "English Speaking Practice",
+    "storageUri": "https://storage.lucy.local/recordings/abc123.mp3",
+    "durationSeconds": 1800,
+    "createdAt": "2026-06-29T10:30:00Z"
+  }
+]
+```
+
+---
+
+## 3. Realtime Service (port 3020)
+
+Công nghệ: Express + Socket.IO (Node.js 22)
+Base URL: `http://localhost:3020`
+
+### REST Endpoints
+
+| Method | Endpoint | Request | Response | Mô tả |
+|---|---|---|---|---|
+| GET | /health | — | `{service, status, storage}` | Health check |
+| GET | /rooms | — | `{rooms: [{roomId, users, raisedHands}]}` | Danh sách phòng đang active |
+| POST | /agora/token | `{channelName, uid, role}` | `{channelName, uid, role, token, note}` | Sinh Agora token (scaffold) |
+
+### Chi tiết REST Endpoint
+
+#### GET /health
+
+```
+GET http://localhost:3020/health
+```
+
+Response (200):
+
+```json
+{
+  "service": "RBL Phase 2 Real-time Audio MVP",
+  "status": "ready",
+  "storage": "MariaDB"
+}
+```
+
+#### GET /rooms
+
+```
+GET http://localhost:3020/rooms
+```
+
+Response (200):
+
+```json
+{
+  "rooms": [
+    {
+      "roomId": "trial-level-1",
+      "createdAt": "2026-06-29T10:00:00Z",
+      "users": [
+        {
+          "participantId": "550e8400-...",
+          "userId": "anon-123",
+          "displayName": "Nguyen Van A",
+          "role": "ANONYMOUS",
+          "micEnabled": true,
+          "joinedAt": "2026-06-29T10:05:00Z"
+        }
+      ],
+      "raisedHands": ["anon-456"]
+    }
+  ]
+}
+```
+
+#### POST /agora/token
+
+```
+POST http://localhost:3020/agora/token
+Content-Type: application/json
+
+{
+  "channelName": "level-1",
+  "uid": "anon-123",
+  "role": "audience"
+}
+```
+
+Response (200):
+
+```json
+{
+  "channelName": "level-1",
+  "uid": "anon-123",
+  "role": "audience",
+  "token": "scaffold-token-placeholder",
+  "note": "scaffold — replace with real Agora Server SDK"
+}
+```
+
+### Socket.IO Events
+
+#### Client to Server
+
+| Event | Payload | Mô tả |
+|---|---|---|
+| `room:join` | `{roomId, userId, displayName, role}` | Join phòng audio |
+| `room:leave` | `{roomId, userId}` | Rời phòng audio |
+| `hand:raise` | `{roomId, raised: bool}` | Giơ tay / hạ tay |
+| `mic:toggle` | `{roomId, enabled: bool}` | Bật / tắt mic |
+| `latency:ping` | `{clientSentAt: timestamp}` | Đo độ trễ client -> server |
+
+#### Server to Client
+
+| Event | Payload | Mô tả |
+|---|---|---|
+| `room:state` | `{roomId, users: [...], raisedHands: [...]}` | Cập nhật trạng thái phòng |
+| `gift:alert` | `{from, amount, message}` | Thông báo có gift mới |
+| `latency:pong` | `{clientSentAt, serverReceivedAt}` | Phản hồi đo độ trễ |
+
+#### Event Flow Example
+
+```
+Client                          Server
+  │                               │
+  │──── room:join ──────────────▶ │
+  │    {roomId, userId, ...}      │
+  │                               │──▶ DB: INSERT participant
+  │                               │──▶ Broadcast room:state
+  │◀──── room:state ─────────────│
+  │    {roomId, users, hands}     │
+  │                               │
+  │──── hand:raise ─────────────▶ │
+  │    {roomId, raised: true}     │
+  │                               │──▶ DB: UPDATE hand_raised
+  │                               │──▶ Broadcast room:state
+  │◀──── room:state ─────────────│
+  │                               │
+  │──── latency:ping ───────────▶ │
+  │    {clientSentAt: T1}         │
+  │◀──── latency:pong ───────────│
+  │    {clientSentAt: T1,         │
+  │     serverReceivedAt: T2}     │
+```
+
+---
+
+## 4. Java LMS (Console)
+
+Công nghệ: Java 26 + State Pattern
+Không có REST API. Chạy dưới dạng console application.
+
+| Command | Mô tả |
+|---|---|
+| `mvn exec:java -Dexec.mainClass=com.lucy.lms.LmsApplication` | Chạy mentor dashboard |
+
+### Output Example
+
+Khi chạy LmsApplication, console in ra:
+
+```
+=== Mentor Dashboard Summary ===
+Mentor ID: mentor-pro-1
+Total Learners Tracked: 2
+
+--- Learner Progress ---
+anon-level-1-demo (Anonymous Level 1)
+  Level: 1
+  Current Sub-Level: WARM_UP
+  Started: 11 minutes ago
+  Status: OVERDUE (exceeded 10-min limit)
+
+anon-level-4-demo (Anonymous Level 4)
+  Level: 4
+  Current Sub-Level: GUIDED_PRACTICE
+  Started: 3 minutes ago
+  Status: IN_PROGRESS
+
+--- Pinned Materials ---
+  English Stage 1 Speaking Drill (en, Stage 1, Level 1)
+  Japanese Stage 1 Listening (ja, Stage 1, Level 1)
+```
+
+---
+
+## 5. Error Codes
+
+### HTTP Status Codes
+
+| Status | Ý nghĩa | Service |
+|---|---|---|
+| 200 | OK | Tất cả |
+| 201 | Created (Register, Create recording) | Auth, Wallet |
+| 400 | Bad Request (thiếu field, amount <= 0) | Auth, Wallet, Realtime |
+| 401 | Unauthorized (sai pass/email, token hết hạn) | Auth |
+| 404 | Not Found | Wallet |
+| 409 | Conflict (email đã tồn tại) | Auth |
+| 500 | Internal Server Error | Tất cả |
+
+### Error Response Format
+
+```json
+{
+  "message": "Email already registered"
+}
+```
+
+### Validation Rules
+
+| Endpoint | Field | Rule |
+|---|---|---|
+| POST /auth/register | email | Required, non-empty, auto lowercase |
+| POST /auth/register | password | Required, non-empty |
+| POST /auth/register | displayName | Required, non-empty |
+| POST /wallets/{userId}/top-up | amount | Must be positive (> 0) |
+| POST /gifts | amount | Must be positive (<= balance) |
+| POST /agora/token | channelName | Required |
+| POST /agora/token | uid | Required |
+
+---
+
+## 6. Authentication Flow
+
+### Flow Diagram
+
+```
+┌──────────┐   1. Register/Login     ┌──────────┐
+│          │ ──────────────────────▶  │   Auth   │
+│  Client  │                          │ Service  │
+│          │ ◀──────────────────────  │  :5000   │
+│          │     JWT + User Info      └──────────┘
+│          │
+│          │   2. Use JWT for Auth    ┌──────────┐
+│          │ ──Bearer JWT──────────▶  │   Auth   │
+│          │                          │ Service  │
+│          │ ◀──User Profile◀────────│  :5000   │
+│          │                          └──────────┘
+│          │
+│          │   3. Wallet API (no auth)┌──────────┐
+│          │ ──────────────────────▶  │  Wallet  │
+│          │                          │ Service  │
+│          │ ◀──────────────────────  │  :5040   │
+│          │     Wallet / Gift Data   └──────────┘
+│          │
+│          │   4. Realtime Socket     ┌──────────┐
+│          │ ──connect + token─────▶  │ Realtime │
+│          │                          │  :3020   │
+│          │ ◀──Socket.IO events◀───  └──────────┘
+└──────────┘
+```
+
+Ghi chú quan trọng:
+
+- Wallet Service hiện tại không yêu cầu JWT (dev mode). Token verification sẽ được thêm trong phiên bản production.
+- Realtime Service nhận userId từ client qua Socket.IO event, không tự verify token. Cơ chế này cần được strengthen trong production.
+- JWT secret key mặc định (`phase1-development-secret-change-before-production`) phải được thay đổi trước production deploy.

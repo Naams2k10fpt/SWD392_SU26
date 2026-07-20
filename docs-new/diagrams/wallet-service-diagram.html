@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Wallet Service — top-up, gift, podcast, balance validation, MariaDB. Vietnamese.">
+<title>Wallet Service — Architecture</title>
+<script>
+  (function () {
+    const saved = localStorage.getItem('theme');
+    const dark = saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', dark);
+  })();
+</script>
+<style>
+  :root {
+    --bg: #FAF9F5; --surface: #FFFFFF; --surface2: #F0EEE6;
+    --ink: #141413; --body: #3D3D3A; --muted: #87867F;
+    --line: #D1CFC5; --line-soft: #E6E3DA;
+    --clay: #D97757; --clay-soft: rgba(217,119,87,0.10);
+    --olive: #788C5D; --olive-soft: rgba(120,140,93,0.12);
+    --gold: #C9A45C; --blue: #5B7E96;
+    --zone: rgba(20,20,19,0.025); --zone-line: #D1CFC5;
+    --serif: ui-serif, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  html.dark {
+    --bg: #141413; --surface: #1F1F1D; --surface2: #2A2A28;
+    --ink: #FAF9F5; --body: #D1CFC5; --muted: #87867F;
+    --line: #3D3D3A; --line-soft: #2A2A28;
+    --clay: #E48A6E; --clay-soft: rgba(228,138,110,0.14);
+    --olive: #9DB07C; --olive-soft: rgba(157,176,124,0.16);
+    --gold: #D4B36F; --blue: #7FA3BC;
+    --zone: rgba(250,249,245,0.03); --zone-line: #3D3D3A;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--body); font-family: var(--sans);
+    -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* ── top bar ─────────────────────────────── */
+  .bar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 20px; border-bottom: 1px solid var(--line-soft); flex: none;
+  }
+  .bar h1 { font-family: var(--serif); font-weight: 500; font-size: 19px; color: var(--ink); letter-spacing: -0.01em; }
+  .bar .sub { font-family: var(--mono); font-size: 10.5px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+  .spacer { flex: 1; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em;
+    padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px;
+    background: transparent; color: var(--muted); cursor: pointer; transition: all .15s ease;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--muted); }
+  .chip.on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+  #themeToggle {
+    font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px;
+    background: transparent; color: var(--muted); cursor: pointer;
+  }
+  #themeToggle:hover { color: var(--ink); border-color: var(--muted); }
+
+  /* ── stage ───────────────────────────────── */
+  .stage { flex: 1; position: relative; min-height: 0; }
+
+  /* canvas container (zoom/pan) */
+  .canvas-container {
+    position: absolute; inset: 0; overflow: hidden;
+    cursor: grab;
+  }
+  .canvas-container:active { cursor: grabbing; }
+  .stage svg { display: block; overflow: visible; user-select: none; }
+
+  /* zoom controls */
+  .zoom-controls {
+    position: absolute; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 10;
+  }
+  .zoom-btn {
+    width: 36px; height: 36px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; color: var(--ink);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05); transition: all 0.15s ease;
+  }
+  .zoom-btn:hover { border-color: var(--muted); transform: translateY(-1px); }
+
+  /* zones */
+  .zone rect { fill: var(--zone); stroke: var(--zone-line); stroke-width: 1; stroke-dasharray: 5 5; rx: 16; }
+  .zone .ztitle { font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; fill: var(--muted); }
+  .zone .zsub { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); opacity: 0.75; }
+
+  /* nodes */
+  .node { cursor: pointer; }
+  .node rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; rx: 10; transition: stroke .15s ease, filter .15s ease; }
+  .node:hover rect { stroke: var(--muted); }
+  .node.sel rect { stroke: var(--clay) !important; stroke-width: 2; }
+  .node .t  { font-family: var(--sans); font-size: 14.5px; font-weight: 600; fill: var(--ink); pointer-events: none; }
+  .node .m  { font-family: var(--mono); font-size: 11px; fill: var(--muted); pointer-events: none; }
+  .node .k  { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; fill: var(--clay); pointer-events: none; }
+  .node.gate rect { fill: var(--clay-soft); stroke: var(--clay); }
+  .node.store rect { fill: var(--surface2); }
+  .node.do rect { fill: var(--olive-soft); stroke: var(--olive); }
+  .node.ext rect { stroke-dasharray: 6 3; }
+
+  /* edges */
+  .edge { stroke: var(--muted); stroke-width: 1.6; fill: none; marker-end: url(#a-mut); transition: opacity .2s ease, stroke .2s ease; }
+  .edge.dash { stroke-dasharray: 5 4; }
+  .edge.ws { stroke-width: 2; }
+  .elbl { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); transition: opacity .2s ease; }
+
+  /* flow highlighting */
+  .stage.flowing .edge { opacity: 0.13; }
+  .stage.flowing .elbl { opacity: 0.13; }
+  .stage.flowing .node { opacity: 0.30; }
+  .stage.flowing .zone { opacity: 0.45; }
+  .stage.flowing .edge.lit {
+    opacity: 1; stroke: var(--clay); marker-end: url(#a-clay);
+    stroke-dasharray: 7 5; animation: march 0.9s linear infinite;
+  }
+  .stage.flowing .elbl.lit { opacity: 1; fill: var(--clay); }
+  .stage.flowing .node.lit { opacity: 1; }
+  .stage.flowing .node.lit rect { stroke: var(--clay); }
+  @keyframes march { to { stroke-dashoffset: -12; } }
+  @media (prefers-reduced-motion: reduce) { .stage.flowing .edge.lit { animation: none; } }
+
+  .badge { font-family: var(--mono); font-size: 11px; font-weight: 700; }
+  .badge circle { fill: var(--clay); }
+  .badge text { fill: var(--bg); }
+  .stage:not(.flowing) .badge { display: none; }
+
+  /* ── floating cards ──────────────────────── */
+  .card {
+    position: absolute; max-width: 360px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.08);
+  }
+  #detail { right: 16px; bottom: 16px; width: 340px; }
+  #detail h3 { font-family: var(--serif); font-weight: 500; font-size: 17px; color: var(--ink); margin-bottom: 2px; }
+  #detail .meta { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-bottom: 8px; }
+  #detail p { font-size: 12.5px; line-height: 1.55; }
+  #detail p code, #flowcap code { font-family: var(--mono); font-size: 11px; color: var(--clay); }
+  #flowcap { left: 16px; bottom: 16px; max-width: 460px; display: none; }
+  #flowcap.show { display: block; }
+  #flowcap .fname { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--clay); margin-bottom: 6px; }
+  #flowcap ol { margin-left: 18px; }
+  #flowcap li { font-size: 12.5px; line-height: 1.55; }
+  .src { position: absolute; top: 10px; right: 16px; font-family: var(--mono); font-size: 10px; color: var(--muted); opacity: 0.8; }
+  @media (max-width: 880px) {
+    body { overflow: auto; }
+    .stage { min-height: 70vh; }
+    #detail { position: static; width: auto; margin: 10px 16px; }
+    #flowcap { position: static; margin: 0 16px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div>
+    <h1>Wallet Service — Architecture</h1>
+    <div class="sub">E-WALLET · .NET 10 :5040</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="chips" id="chips">
+    <button class="chip on" data-flow="all">All</button>
+    <button class="chip" data-flow="topup">Top-up Flow</button>
+    <button class="chip" data-flow="gift">Gift Flow</button>
+    <button class="chip" data-flow="podcast">Podcast Flow</button>
+  </div>
+  <button id="themeToggle">☾</button>
+</div>
+
+<div class="stage" id="stage">
+  <div class="canvas-container" id="canvas-container">
+  <svg viewBox="0 0 1560 980" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <marker id="a-mut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"/>
+    </marker>
+    <marker id="a-clay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--clay)"/>
+    </marker>
+  </defs>
+  <g id="viewport">
+
+  <!-- ── zones ─────────────────────────────── -->
+  <g class="zone" id="z-clients">
+    <rect x="40" y="100" width="220" height="620"/>
+    <text class="ztitle" x="60" y="130">Clients</text>
+    <text class="zsub" x="60" y="148">Flutter · Swagger</text>
+  </g>
+  <g class="zone" id="z-wallet">
+    <rect x="290" y="100" width="240" height="620"/>
+    <text class="ztitle" x="310" y="130">Wallet API (.NET :5040)</text>
+    <text class="zsub" x="310" y="148">Transaction processing</text>
+  </g>
+  <g class="zone" id="z-ledger">
+    <rect x="560" y="100" width="320" height="620"/>
+    <text class="ztitle" x="580" y="130">Business Logic</text>
+    <text class="zsub" x="580" y="148">Account &amp; gift logic</text>
+  </g>
+  <g class="zone" id="z-stores">
+    <rect x="910" y="100" width="220" height="620"/>
+    <text class="ztitle" x="930" y="130">Data Stores</text>
+    <text class="zsub" x="930" y="148">MariaDB 12.2</text>
+  </g>
+
+  <!-- ── edges ─────────────────────────────── -->
+  <path class="edge" id="e-flutter-wallet" d="M 240,230 C 275,230 275,230 310,230"/>
+  <path class="edge" id="e-swagger-wallet" d="M 240,330 C 275,330 275,280 310,280"/>
+  <path class="edge" id="e-wallet-txn"     d="M 410,280 L 410,320"/>
+  <path class="edge" id="e-wallet-balance" d="M 410,280 L 410,440"/>
+  <path class="edge" id="e-wallet-account" d="M 510,240 C 545,240 545,200 580,200"/>
+  <path class="edge" id="e-wallet-gift"    d="M 510,240 C 545,240 545,320 580,320"/>
+  <path class="edge" id="e-wallet-podcast" d="M 510,240 C 545,240 545,440 580,440"/>
+  <path class="edge" id="e-account-db"     d="M 860,200 C 895,200 895,240 930,240"/>
+  <path class="edge" id="e-gift-db"        d="M 860,320 C 895,320 895,280 930,280"/>
+  <path class="edge" id="e-podcast-db"     d="M 860,440 C 895,440 895,320 930,320"/>
+
+  <!-- edge labels -->
+  <text class="elbl" data-e="e-flutter-wallet" x="275" y="222">GET /wallets/{id}</text>
+  <text class="elbl" data-e="e-swagger-wallet" x="275" y="315" text-anchor="end">POST top-up / gift</text>
+  <text class="elbl" data-e="e-wallet-txn"  x="420" y="305">createTransaction()</text>
+  <text class="elbl" data-e="e-wallet-balance" x="420" y="365">validateBalance()</text>
+  <text class="elbl" data-e="e-wallet-account" x="548" y="228" text-anchor="middle">getOrCreateWallet</text>
+  <text class="elbl" data-e="e-wallet-gift" x="548" y="280" text-anchor="middle">sendGift</text>
+  <text class="elbl" data-e="e-wallet-podcast" x="548" y="370" text-anchor="middle">createRecording</text>
+  <text class="elbl" data-e="e-account-db"  x="895" y="228" text-anchor="middle">wallet_accounts</text>
+  <text class="elbl" data-e="e-gift-db"     x="895" y="310" text-anchor="middle">gift_transactions</text>
+  <text class="elbl" data-e="e-podcast-db"  x="895" y="380" text-anchor="middle">podcast_recordings</text>
+
+  <!-- ── nodes: clients ────────────────────── -->
+  <g class="node" data-k="flutter_app">
+    <rect x="60" y="200" width="180" height="60"/>
+    <text class="t" x="80" y="228">Flutter App</text>
+    <text class="m" x="80" y="246">Mobile app</text>
+  </g>
+  <g class="node" data-k="swagger_ui">
+    <rect x="60" y="300" width="180" height="60"/>
+    <text class="t" x="80" y="328">Swagger UI</text>
+    <text class="m" x="80" y="346">API docs &amp; test</text>
+  </g>
+
+  <!-- ── nodes: wallet api ─────────────────── -->
+  <g class="node gate" data-k="wallet_ctrl">
+    <rect x="310" y="200" width="200" height="80"/>
+    <text class="t" x="330" y="228">WalletController</text>
+    <text class="m" x="330" y="248">GET /wallets/{id}</text>
+    <text class="m" x="330" y="262">POST /wallets/top-up</text>
+    <text class="m" x="330" y="274">POST /wallets/gift</text>
+  </g>
+  <g class="node do" data-k="txn_mgr">
+    <rect x="310" y="320" width="200" height="60"/>
+    <text class="t" x="330" y="348">Transaction Manager</text>
+    <text class="m" x="330" y="366">Atomic MariaDB transactions</text>
+  </g>
+  <g class="node do" data-k="balance_validator">
+    <rect x="310" y="440" width="200" height="60"/>
+    <text class="t" x="330" y="468">Balance Validator</text>
+    <text class="m" x="330" y="486">Prevent overdraft</text>
+  </g>
+
+  <!-- ── nodes: ledger services ────────────── -->
+  <g class="node do" data-k="account_svc">
+    <rect x="580" y="170" width="280" height="60"/>
+    <text class="t" x="600" y="198">Account Service</text>
+    <text class="m" x="600" y="216">getOrCreateWallet</text>
+  </g>
+  <g class="node do" data-k="gift_svc">
+    <rect x="580" y="290" width="280" height="60"/>
+    <text class="t" x="600" y="318">Gift Service</text>
+    <text class="m" x="600" y="336">Send gifts to other users</text>
+  </g>
+  <g class="node do" data-k="podcast_svc">
+    <rect x="580" y="410" width="280" height="60"/>
+    <text class="t" x="600" y="438">Podcast Service</text>
+    <text class="m" x="600" y="456">Create podcast recordings</text>
+  </g>
+
+  <!-- ── nodes: data stores ────────────────── -->
+  <g class="node store" data-k="mariadb">
+    <rect x="930" y="200" width="180" height="90"/>
+    <text class="t" x="950" y="230">MariaDB (lucy_wallet)</text>
+    <text class="m" x="950" y="252">wallet_accounts</text>
+    <text class="m" x="950" y="268">gift_transactions</text>
+    <text class="m" x="950" y="284">podcast_recordings</text>
+  </g>
+  </g>
+  </svg>
+  </div> <!-- /canvas-container -->
+
+  <div class="zoom-controls">
+    <button class="zoom-btn" id="zoom-in">+</button>
+    <button class="zoom-btn" id="zoom-reset">⟲</button>
+    <button class="zoom-btn" id="zoom-out">-</button>
+  </div>
+
+  <div class="src">LUCY SWD392/wallet-service · Wallet &amp; Transactions</div>
+
+  <div class="card" id="flowcap">
+    <div class="fname" id="f-name"></div>
+    <ol id="f-steps"></ol>
+  </div>
+
+  <div class="card" id="detail">
+    <h3 id="d-title">Click a node</h3>
+    <div class="meta" id="d-meta">Node Details</div>
+    <p id="d-body">Mỗi ô đều có thể click. Click các luồng phía trên để xem đường đi: Nạp tiền, Tặng quà, Podcast.</p>
+  </div>
+</div>
+<script>
+const DETAIL = {
+  flutter_app: { t: "Flutter App", m: "Mobile App", b: "Ứng dụng di động Flutter. Xem số dư ví, nạp tiền, tặng quà cho người dùng khác." },
+  swagger_ui: { t: "Swagger UI", m: "API Documentation", b: "Giao diện Swagger để test API Wallet Service (cổng 5040) trong quá trình phát triển." },
+  wallet_ctrl: { t: "WalletController", m: "REST Controller (.NET 10)", b: "Xử lý các route ví: <code>GET /wallets/{id}</code> (xem số dư), <code>POST /wallets/top-up</code> (nạp tiền), <code>POST /wallets/gift</code> (gửi quà)." },
+  txn_mgr: { t: "Transaction Manager", m: "Transaction Manager", b: "Tạo giao dịch MariaDB nguyên tử. Mỗi lần nạp/rút đều được ghi lại với số tiền, loại, trạng thái, và thời gian." },
+  balance_validator: { t: "Balance Validator", m: "Balance Checker", b: "Kiểm tra số dư trước mỗi giao dịch rút. Ngăn thấu chi bằng cách so sánh số dư hiện tại với số tiền giao dịch." },
+  account_svc: { t: "Account Service", m: "Account Service", b: "Quản lý tài khoản ví: <code>getOrCreateWallet</code> tự động tạo ví nếu chưa có, lưu thông tin vào bảng <code>wallet_accounts</code>." },
+  gift_svc: { t: "Gift Service", m: "Gift Service", b: "Xử lý gửi quà giữa các user. Tạo bản ghi trong <code>gift_transactions</code> với người gửi, người nhận, và số tiền." },
+  podcast_svc: { t: "Podcast Service", m: "Podcast Service", b: "Quản lý bản ghi podcast. Lưu thông tin bản ghi vào bảng <code>podcast_recordings</code>." },
+  mariadb: { t: "MariaDB (lucy_wallet)", m: "Relational Database (Port 3306)", b: "MariaDB 12.2 lưu <code>wallet_accounts</code>, <code>gift_transactions</code>, <code>podcast_recordings</code>." }
+};
+
+const FLOWS = {
+  topup: {
+    name: "Luồng Nạp Tiền",
+    edges: ["e-flutter-wallet","e-wallet-txn","e-wallet-account","e-account-db"],
+    nodes: ["flutter_app","wallet_ctrl","txn_mgr","account_svc","mariadb"],
+    steps: [
+      "Người dùng yêu cầu nạp tiền từ Flutter App.",
+      "<code>WalletController</code> nhận <code>POST /wallets/nạp-tiền</code>.",
+      "<code>Transaction Manager</code> tạo giao dịch nạp tiền nguyên tử.",
+      "<code>Account Service</code> cập nhật số dư ví trong bảng <code>wallet_accounts</code>.",
+      "Phản hồi thành công gửi về Flutter App."
+    ]
+  },
+  gift: {
+    name: "Luồng Tặng Quà",
+    edges: ["e-swagger-wallet","e-wallet-balance","e-wallet-gift","e-gift-db"],
+    nodes: ["swagger_ui","wallet_ctrl","balance_validator","gift_svc","mariadb"],
+    steps: [
+      "Người dùng gửi quà qua Swagger UI hoặc app.",
+      "<code>WalletController</code> nhận yêu cầu tặng quà.",
+      "<code>Balance Validator</code> kiểm tra số dư đủ để tặng.",
+      "<code>Gift Service</code> tạo bản ghi trong <code>gift_transactions</code>.",
+      "Số dư người gửi bị trừ, người nhận được cộng tương ứng."
+    ]
+  },
+  podcast: {
+    name: "Luồng Podcast",
+    edges: ["e-flutter-wallet","e-wallet-txn","e-wallet-podcast","e-podcast-db"],
+    nodes: ["flutter_app","wallet_ctrl","txn_mgr","podcast_svc","mariadb"],
+    steps: [
+      "Người dùng tạo bản ghi podcast từ Flutter App.",
+      "<code>WalletController</code> xử lý tạo bản ghi mới.",
+      "<code>Transaction Manager</code> tạo giao dịch liên quan (nếu có phí).",
+      "<code>Podcast Service</code> lưu thông tin vào <code>podcast_recordings</code>.",
+      "Xác nhận hoàn tất gửi về client."
+    ]
+  }
+};
+
+const stage = document.getElementById('stage');
+const nodes = document.querySelectorAll('.node');
+const edges = document.querySelectorAll('.edge');
+const elbls = document.querySelectorAll('.elbl');
+const chips = document.querySelectorAll('.chip');
+const fcap = document.getElementById('flowcap');
+
+function setFlow(key) {
+  chips.forEach(c => c.classList.toggle('on', c.dataset.flow === key));
+  edges.forEach(e => e.classList.remove('lit'));
+  elbls.forEach(l => l.classList.remove('lit'));
+  nodes.forEach(n => n.classList.remove('lit'));
+  if (key === 'all') { stage.classList.remove('flowing'); fcap.classList.remove('show'); return; }
+  const f = FLOWS[key];
+  if (!f) return;
+  stage.classList.add('flowing');
+  f.edges.forEach(id => document.getElementById(id)?.classList.add('lit'));
+  elbls.forEach(l => { if (f.edges.includes(l.dataset.e)) l.classList.add('lit'); });
+  f.nodes.forEach(k => document.querySelector(".node[data-k='" + k + "']")?.classList.add('lit'));
+  document.getElementById('f-name').textContent = f.name;
+  document.getElementById('f-steps').innerHTML = f.steps.map(s => "<li>" + s + "</li>").join('');
+  fcap.classList.add('show');
+}
+chips.forEach(c => c.addEventListener('click', () => setFlow(c.dataset.flow)));
+
+nodes.forEach(n => n.addEventListener('click', () => {
+  nodes.forEach(x => x.classList.remove('sel'));
+  n.classList.add('sel');
+  const d = DETAIL[n.dataset.k];
+  if (!d) return;
+  document.getElementById('d-title').textContent = d.t;
+  document.getElementById('d-meta').textContent = d.m;
+  document.getElementById('d-body').innerHTML = d.b;
+}));
+
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const dark = !document.documentElement.classList.contains('dark');
+  document.documentElement.classList.toggle('dark', dark);
+  localStorage.setItem('theme', dark ? 'dark' : 'light');
+});
+
+// Zoom and Pan Logic
+let scale = 1;
+let translateX = 0;
+let translateY = 0;
+let isDragging = false;
+let startX, startY;
+const container = document.getElementById('canvas-container');
+const viewport = document.getElementById('viewport');
+
+function updateTransform() {
+  viewport.setAttribute('transform', `translate(${translateX}, ${translateY}) scale(${scale})`);
+}
+
+container.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.node') || e.target.closest('.zoom-controls') || e.target.closest('.bottom-panel') || e.target.closest('.card')) return;
+  isDragging = true;
+  startX = e.clientX - translateX;
+  startY = e.clientY - translateY;
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  translateX = e.clientX - startX;
+  translateY = e.clientY - startY;
+  updateTransform();
+});
+
+window.addEventListener('mouseup', () => { isDragging = false; });
+window.addEventListener('mouseleave', () => { isDragging = false; });
+
+container.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const scaleChange = e.deltaY > 0 ? 0.9 : 1.1;
+  const newScale = Math.min(Math.max(0.3, scale * scaleChange), 3);
+  
+  const rect = container.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const mouseY = e.clientY - rect.top;
+  
+  translateX = mouseX - (mouseX - translateX) * (newScale / scale);
+  translateY = mouseY - (mouseY - translateY) * (newScale / scale);
+  scale = newScale;
+  
+  updateTransform();
+}, { passive: false });
+
+// Auto center on load
+setTimeout(() => {
+  const rect = container.getBoundingClientRect();
+  const svgW = 1560;
+  const svgH = 980;
+  scale = rect.width < svgW ? rect.width / (svgW + 100) : 1; 
+  translateX = (rect.width - svgW * scale) / 2; 
+  translateY = (rect.height - svgH * scale) / 2; 
+  updateTransform();
+}, 50);
+
+document.getElementById('zoom-in').addEventListener('click', () => { scale = Math.min(scale * 1.2, 3); updateTransform(); });
+document.getElementById('zoom-out').addEventListener('click', () => { scale = Math.max(scale * 0.8, 0.3); updateTransform(); });
+document.getElementById('zoom-reset').addEventListener('click', () => { 
+  const rect = container.getBoundingClientRect();
+  const svgW = 1560;
+  const svgH = 980;
+  scale = rect.width < svgW ? rect.width / (svgW + 100) : 1; 
+  translateX = (rect.width - svgW * scale) / 2; 
+  translateY = (rect.height - svgH * scale) / 2; 
+  updateTransform();
+});
+</script>
+</body>
+</html>

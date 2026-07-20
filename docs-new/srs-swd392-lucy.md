@@ -1,0 +1,203 @@
+# Software Requirements Specification — LUCY SWD392
+
+| **Tên dự án** | LUCY (Language Unity & Collaborative Youth) |
+|---|---|
+| **Phiên bản** | 1.0.0 |
+| **Ngày tạo** | 2026-06-29 |
+| **Loại tài liệu** | SRS |
+| **Công nghệ** | .NET 10, Node.js 22, Java 26, MariaDB 12, Flutter 3.27+ |
+| **Chủ biên** | Nhóm SWD392 |
+
+---
+
+## Mục lục
+
+- [1. Giới thiệu](#1-gioi-thieu)
+- [2. Actors & Roles](#2-actors--roles)
+- [3. Kiến trúc tổng thể](#3-kien-truc-tong-the)
+- [4. Tính năng theo Phase](#4-tinh-nang-theo-phase)
+- [5. Non-functional Requirements](#5-non-functional-requirements)
+- [6. API Overview](#6-api-overview)
+- [7. Glossary](#7-glossary)
+
+---
+
+## 1. Giới thiệu
+
+LUCY (Language Unity & Collaborative Youth) là nền tảng mạng xã hội âm thanh kết hợp EdTech, cho phép học ngôn ngữ (Anh - Trung - Nhật) thông qua giao tiếp real-time. Người dùng tương tác trong các phòng audio theo cấp độ, được hướng dẫn bởi Mentor (Pro) và nội dung từ Creator (Super).
+
+Dự án được triển khai theo 5 phase, mỗi phase mở rộng dần kiến trúc từ monolith sang microservices, tích hợp thêm real-time audio, LMS state pattern, monetization wallet, và stress test.
+
+Mục tiêu của tài liệu này là định nghĩa các yêu cầu chức năng, phi chức năng, actor, và API overview cho toàn bộ hệ thống LUCY.
+
+---
+
+## 2. Actors & Roles
+
+Hệ thống định nghĩa 3 actor chính:
+
+| Actor | Mô tả | Quyền hạn |
+|---|---|---|
+| **Anonymous** | Người dùng ẩn danh, không cần đăng ký để trải nghiệm | Vào phòng Level 1-5, giơ tay, bật/tắt mic, nhận token Agora, tặng quà (nếu có ví) |
+| **Pro (Mentor)** | Giáo viên hoặc người hướng dẫn | Quyền Anonymous + ghim tài liệu học, xem dashboard learner, quản lý sub-level transition, theo dõi tiến độ |
+| **Super (Creator)** | Người sáng tạo nội dung | Quyền Pro + record podcast, quản lý nội dung học liệu, nhận gift từ người dùng |
+
+### Role Hierarchy
+
+```
+Super (Creator)
+  └── Pro (Mentor)
+       └── Anonymous
+```
+
+Mỗi role kế thừa quyền của role dưới. Anonymous là role mặc định khi người dùng chưa đăng nhập hoặc mới đăng ký.
+
+---
+
+## 3. Kiến trúc tổng thể
+
+Hệ thống gồm 4 backend service và 1 mobile client:
+
+| Service | Công nghệ | Port | Database | Mục đích |
+|---|---|---|---|---|
+| **Auth Service** | ASP.NET Core Minimal API (.NET 10) | 5000 | MariaDB (lucy_phaseX) | Đăng ký, đăng nhập, JWT |
+| **Wallet Service** | ASP.NET Core Minimal API + Swagger (.NET 10) | 5040 | MariaDB (lucy_phaseX) | Ví điện tử, nạp tiền, gift, podcast |
+| **Realtime Service** | Express + Socket.IO (Node.js 22) | 3020 | MariaDB (lucy_phaseX) | Phòng audio real-time, Agora token |
+| **LMS Service** | Java Console + State Pattern (Java 26) | Console | MariaDB (lucy_phaseX) | Mentor dashboard, sub-level transition |
+| **Mobile App** | Flutter 3.27+ | — | Gọi API backend | Giao diện người dùng di động |
+
+Tất cả service dùng chung một MariaDB instance (port 3306) nhưng tách biệt database theo phase (lucy_phase1 đến lucy_phase5).
+
+---
+
+## 4. Tính năng theo Phase
+
+### Phase 1: Requirements, Digitization & Auth
+
+| ID | Tính năng | Mô tả |
+|---|---|---|
+| F1.1 | Digitize content | Đọc file Word English/Chinese/Japanese, xuất JSON + SQL |
+| F1.2 | Import content | Script Python + Java Apache POI import học liệu vào DB |
+| F1.3 | User Registration | Đăng ký với email, password, displayName, role |
+| F1.4 | User Login | Xác thực, trả JWT (HMAC-SHA256) |
+| F1.5 | Profile | Xem thông tin user hiện tại qua JWT |
+| F1.6 | Database schema | Tạo tables: users, roles, user_roles, languages, stages, levels, lessons, content_blocks |
+
+### Phase 2: Realtime Audio MVP
+
+| ID | Tính năng | Mô tả |
+|---|---|---|
+| F2.1 | Health check | Kiểm tra trạng thái service |
+| F2.2 | Room management | Tạo và liệt kê phòng audio |
+| F2.3 | Agora token scaffold | Sinh token Agora cho WebRTC |
+| F2.4 | Socket.IO events | room:join, hand:raise, mic:toggle, latency:ping |
+| F2.5 | Participant tracking | Lưu thông tin người tham gia phòng |
+| F2.6 | Latency measurement | Đo độ trễ round-trip giữa client và server |
+
+### Phase 3: LMS & State Pattern
+
+| ID | Tính năng | Mô tả |
+|---|---|---|
+| F3.1 | Mentor dashboard | Hiển thị danh sách learner, trạng thái sub-level |
+| F3.2 | Material pinning | Ghim tài liệu học cho level cụ thể |
+| F3.3 | Learner progress | Theo dõi level/sub-level hiện tại của learner |
+| F3.4 | State Pattern transitions | WarmUp -> GuidedPractice -> PeerExchange -> Reflection |
+| F3.5 | Timer-based sub-level | Sub-level tự động chuyển sau 10 phút |
+| F3.6 | Transition events | Ghi log mỗi lần chuyển sub-level |
+
+### Phase 4: SOA & Monetization
+
+| ID | Tính năng | Mô tả |
+|---|---|---|
+| F4.1 | Wallet management | Tạo ví, xem số dư (VND) |
+| F4.2 | Top-up | Nạp tiền vào ví (MariaDB transaction) |
+| F4.3 | Gift sending | Gửi quà từ user đến creator (transaction + realtime broadcast) |
+| F4.4 | Gift listing | Xem lịch sử quà tặng |
+| F4.5 | Podcast recording | Tạo và xem danh sách recording metadata |
+| F4.6 | Swagger UI | Tài liệu API cho Wallet Service |
+| F4.7 | Cross-service flow | Auth -> Wallet -> Realtime integration |
+
+### Phase 5: Stress Test & Final Evaluation
+
+| ID | Tính năng | Mô tả |
+|---|---|---|
+| F5.1 | k6 stress test | 500-1000 virtual users, các kịch bản realtime/auth/wallet |
+| F5.2 | Cross testing report | Ghi nhận kết quả cross-test giữa các nhóm |
+| F5.3 | Performance thresholds | p(95) latency < 800ms, failure rate < 5% |
+| F5.4 | Flutter mobile app | Giao diện người dùng trên di động |
+
+---
+
+## 5. Non-functional Requirements
+
+| ID | Yêu cầu | Mô tả | Phase |
+|---|---|---|---|
+| NFR1 | Authentication | JWT-based, HMAC-SHA256, claims: sub, email, role | 1 |
+| NFR2 | Token expiry | JWT hết hạn sau 2 giờ | 1 |
+| NFR3 | Database transaction | MariaDB transaction cho top-up và gift | 4 |
+| NFR4 | API documentation | Swagger UI tại /swagger (Wallet Service) | 4 |
+| NFR5 | CORS | Realtime service cho phép CORS origin tùy chỉnh | 2 |
+| NFR6 | Security isolation | Identity (.NET) tách biệt với Realtime (Node.js) qua token | 4 |
+| NFR7 | Stress test | k6 script với thresholds cụ thể | 5 |
+| NFR8 | Password hashing | ASP.NET Core Identity PasswordHasher | 1 |
+| NFR9 | Database charset | utf8mb4 + unicode_ci cho toàn bộ schema | 1 |
+
+---
+
+## 6. API Overview
+
+### Auth Service (port 5000)
+
+| Method | Endpoint | Auth | Mô tả |
+|---|---|---|---|
+| GET | / | No | Health check |
+| POST | /auth/register | No | Đăng ký tài khoản mới |
+| POST | /auth/login | No | Đăng nhập, nhận JWT |
+| GET | /auth/me | Bearer JWT | Xem thông tin user hiện tại |
+
+### Wallet Service (port 5040)
+
+| Method | Endpoint | Auth | Mô tả |
+|---|---|---|---|
+| GET | /health | No | Health check |
+| GET | /wallets/{userId} | No | Xem thông tin ví |
+| POST | /wallets/{userId}/top-up | No | Nạp tiền vào ví |
+| POST | /gifts | No | Gửi quà tặng |
+| GET | /gifts | No | Xem danh sách quà tặng |
+| POST | /podcasts/recordings | No | Tạo podcast recording |
+| GET | /podcasts/recordings | No | Xem danh sách recording |
+
+### Realtime Service (port 3020)
+
+| Method | Endpoint | Mô tả |
+|---|---|---|
+| GET | /health | Health check |
+| GET | /rooms | Liệt kê phòng đang hoạt động |
+| POST | /agora/token | Sinh token Agora (scaffold) |
+
+Socket.IO events: room:join, room:leave, hand:raise, mic:toggle, latency:ping, room:state
+
+### LMS Service (console)
+
+| Command | Mô tả |
+|---|---|
+| mvn exec:java -Dexec.mainClass=com.lucy.lms.LmsApplication | Chạy dashboard mentor, in báo cáo learner progress |
+
+---
+
+## 7. Glossary
+
+| Thuật ngữ | Ý nghĩa |
+|---|---|
+| LUCY | Language Unity & Collaborative Youth |
+| RBL | Research-Based Learning |
+| SWD392 | Mã môn học (Software Architecture and Design) |
+| JWT | JSON Web Token |
+| Agora | Nền tảng WebRTC cho real-time audio/video |
+| Socket.IO | Thư viện WebSocket cho Node.js |
+| SOA | Service-Oriented Architecture |
+| LMS | Learning Management System |
+| State Pattern | Design pattern cho sub-level transitions |
+| Sub-Level | Giai đoạn nhỏ trong 1 level: WarmUp, GuidedPractice, PeerExchange, Reflection |
+| VND | Đơn vị tiền tệ (Việt Nam Đồng) |
+| Scaffold | Code mẫu/minimal implementation |

@@ -40,7 +40,8 @@ type Participant = {
   micEnabled: boolean;
   joinedAt: string;
 };
-type Room = { roomId: string; createdAt: string; users: Participant[]; raisedHands: string[] };
+type Room = { roomId: string; createdAt: string; users: Participant[]; raisedHands: string[]; languageCode?: string; levelNumber?: number };
+type RoomInfo = { roomCode: string; title: string; languageCode: string; levelNumber: number; participantCount?: number; status: string };
 type Socket = {
   on<T extends unknown[]>(event: string, callback: (...args: T) => void): Socket;
   off(event?: string): Socket;
@@ -92,6 +93,20 @@ async function api<T>(
   const text = await response.text();
   const body = text ? JSON.parse(text) : null;
   if (!response.ok) throw new Error(body?.message || `Yêu cầu thất bại (${response.status})`);
+  return body as T;
+}
+
+async function realtimeApi<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`http://localhost:3020${path}`, {
+    ...options,
+    headers: {
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...options.headers,
+    },
+  });
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
+  if (!response.ok) throw new Error(body?.message || `Request failed (${response.status})`);
   return body as T;
 }
 
@@ -174,6 +189,7 @@ export default function LucyPage() {
     localStorage.setItem(SESSION_KEY, JSON.stringify(next));
     setSession(next);
   };
+  const [showCreateRoom, setShowCreateRoom] = useState(false);
 
   if (booting) return <div className="boot"><span className="spinner" />Đang mở LUCY…</div>;
 
@@ -184,7 +200,7 @@ export default function LucyPage() {
       <LoginView onLogin={saveSession} />
     )
   ) : (
-    <AppShell route={route} session={session} logout={logout}>
+    <AppShell route={route} session={session} logout={logout} onCreateRoom={() => setShowCreateRoom(true)}>
       {route === "/room" && <RoomView session={session} />}
       {route === "/wallet" && <WalletView session={session} notify={notify} />}
       {route === "/gifts" && <GiftsView session={session} notify={notify} />}
@@ -193,7 +209,7 @@ export default function LucyPage() {
     </AppShell>
   );
 
-  return <>{content}{toast && <div className="toast" role="status">{toast}</div>}</>;
+  return <>{content}{toast && <div className="toast" role="status">{toast}</div>}{showCreateRoom && session && <CreateRoomDialog session={session} onClose={() => setShowCreateRoom(false)} />}</>;
 }
 
 function LoginView({ onLogin }: { onLogin: (session: Session) => void }) {
@@ -282,12 +298,13 @@ const nav = [
   ["/podcasts", "📻", "Podcast"],
 ] as const;
 
-function AppShell({ route, session, logout, children }: { route: Route; session: Session; logout: () => void; children: React.ReactNode }) {
+function AppShell({ route, session, logout, onCreateRoom, children }: { route: Route; session: Session; logout: () => void; onCreateRoom?: () => void; children: React.ReactNode }) {
+  const canCreate = session.user.role === "PRO" || session.user.role === "SUPER";
   return <div className="app-shell">
     <aside className="sidebar">
       <a className="side-brand" href="#/home"><span>✦</span><b>LUCY</b></a>
       <nav aria-label="Điều hướng chính">{nav.map(([href, icon, label]) => <a key={href} href={`#${href}`} className={route === href ? "active" : ""}><span>{icon}</span>{label}</a>)}</nav>
-      <div className="side-user"><span className="avatar">{session.user.displayName?.[0]?.toUpperCase() || "U"}</span><div><b>{session.user.displayName}</b><small>{session.user.role}</small></div><button onClick={logout} aria-label="Đăng xuất" title="Đăng xuất">↪</button></div>
+      <div className="side-user"><span className="avatar">{session.user.displayName?.[0]?.toUpperCase() || "U"}</span><div><b>{session.user.displayName}</b><small>{session.user.role}</small></div>{canCreate && <button onClick={onCreateRoom} aria-label="Tạo phòng" title="Tạo phòng học mới">＋</button>}<button onClick={logout} aria-label="Đăng xuất" title="Đăng xuất">↪</button></div>
     </aside>
     <main className="main-area">
       <header className="topbar"><div><small>LUCY · Phase 5</small><h1>{nav.find(([href]) => href === route)?.[2] || "Trang chủ"}</h1></div><span className="role-pill">{session.user.role}</span></header>
@@ -421,6 +438,159 @@ function PodcastsView({ session, notify }: { session: Session; notify: (message:
   return <><div className="section-heading"><div><span className="eyebrow">📻 Thư viện</span><h2>Podcast bài học</h2><p>Nghe lại nội dung từ các phòng học LUCY.</p></div>{isSuper && <button className="primary-button fit" onClick={() => { setError(""); setDialog(true); }}>＋ Tạo mới</button>}</div>{error && !dialog && <p className="error banner" role="alert">{error} <button onClick={load}>Thử lại</button></p>}{loading ? <Empty text="Đang tải podcast…" loading /> : items.length ? <section className="podcast-grid">{items.map(item => <article className="podcast-card" key={item.id}><div className="podcast-art"><span>▶</span><small>{duration(item.durationSeconds)}</small></div><div><span className="eyebrow">{item.roomId}</span><h3>{item.title}</h3><p>Tác giả: {item.creatorId}</p><small>{dateTime(item.createdAt)}</small></div><button disabled title="Bản demo chỉ lưu metadata" aria-label="Phát podcast">▶</button></article>)}</section> : <Empty text="Chưa có bản ghi podcast nào" />}{dialog && <div className="modal-backdrop" role="presentation" onMouseDown={() => !creating && setDialog(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="podcast-title" onMouseDown={event => event.stopPropagation()}><div className="panel-title"><div><span className="eyebrow">Creator tools</span><h2 id="podcast-title">Tạo podcast mới</h2></div><button className="icon-button" onClick={() => setDialog(false)} aria-label="Đóng">×</button></div><form className="form compact" onSubmit={create}><label>Creator ID<input name="creatorId" defaultValue={session.user.id} required /></label><label>Room ID<input name="roomId" required /></label><label>Tiêu đề<input name="title" required /></label><label>Storage URI<input name="storageUri" placeholder="s3://recordings/..." required /></label><label>Thời lượng (giây)<input name="durationSeconds" type="number" min="1" required /></label>{error && <p className="error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setDialog(false)}>Hủy</button><button className="primary-button fit" disabled={creating}>{creating ? "Đang tạo…" : "Tạo podcast"}</button></div></form></section></div>}</>;
 }
 
+function CreateRoomDialog({ onClose, session }: { onClose: () => void; session: Session }) {
+  const [language, setLanguage] = useState("en");
+  const [levelNumber, setLevelNumber] = useState(1);
+  const [roomCode, setRoomCode] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
+
+  const LANGUAGES = [
+    { code: "en", name: "English" },
+    { code: "zh", name: "Chinese" },
+    { code: "ja", name: "Japanese" },
+  ];
+
+  useEffect(() => {
+    setRoomCode(`${language}-level-${levelNumber}-${Date.now().toString(36)}`);
+  }, [language, levelNumber]);
+
+  async function create(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreating(true);
+    setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      await realtimeApi("/rooms", {
+        method: "POST",
+        body: JSON.stringify({
+          roomCode: form.get("roomCode"),
+          title: form.get("title") || `${LANGUAGES.find(l => l.code === language)?.name} Level ${levelNumber}`,
+          languageCode: language,
+          levelNumber,
+        }),
+      });
+      onClose();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Không thể tạo phòng");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={() => !creating && onClose()}>
+    <section className="modal" role="dialog" aria-modal="true" aria-labelledby="create-room-title" onMouseDown={e => e.stopPropagation()}>
+      <div className="panel-title">
+        <div>
+          <span className="eyebrow">✦ Mentor tools</span>
+          <h2 id="create-room-title">Tạo phòng học mới</h2>
+        </div>
+        <button className="icon-button" onClick={onClose} aria-label="Đóng">×</button>
+      </div>
+      <form className="form compact" onSubmit={create}>
+        <label>Ngôn ngữ
+          <select value={language} onChange={e => setLanguage(e.target.value)}>
+            {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+          </select>
+        </label>
+        <label>Cấp độ (Level)
+          <input type="number" min={1} max={100} value={levelNumber} onChange={e => setLevelNumber(Number(e.target.value))} />
+        </label>
+        <label>Mã phòng
+          <input name="roomCode" value={roomCode} onChange={e => setRoomCode(e.target.value)} required />
+        </label>
+        <label>Tên phòng (không bắt buộc)
+          <input name="title" placeholder={`${LANGUAGES.find(l => l.code === language)?.name} Level ${levelNumber}`} />
+        </label>
+        {error && <p className="error" role="alert">{error}</p>}
+        <div className="form-actions">
+          <button type="button" className="secondary-button" onClick={onClose} disabled={creating}>← Hủy</button>
+          <button className="primary-button" disabled={creating}>
+            {creating ? <><span className="spinner small" />Đang tạo</> : "Tạo phòng →"}
+          </button>
+        </div>
+      </form>
+    </section>
+  </div>;
+}
+
+function RoomBrowser({ session, onJoin }: { session: Session; onJoin: (roomCode: string) => void }) {
+  const [rooms, setRooms] = useState<RoomInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [filterLang, setFilterLang] = useState("");
+
+  const LANGUAGES = [
+    { code: "en", name: "English" },
+    { code: "zh", name: "Chinese" },
+    { code: "ja", name: "Japanese" },
+  ];
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const query = filterLang ? `?language=${filterLang}` : "";
+      const result = await realtimeApi<{ rooms: RoomInfo[] }>(`/rooms${query}`);
+      setRooms(result.rooms);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Không thể tải danh sách phòng");
+    } finally {
+      setLoading(false);
+    }
+  }, [filterLang]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, RoomInfo[]>();
+    for (const r of rooms) {
+      const key = `${r.languageCode}-${r.levelNumber}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(r);
+    }
+    return Array.from(map.entries()).sort();
+  }, [rooms]);
+
+  return <div className="room-browser">
+    <div className="section-heading">
+      <div>
+        <span className="eyebrow">🎙️ Phòng học</span>
+        <h2>Danh sách phòng</h2>
+        <p>Chọn phòng để tham gia học tập cùng nhóm.</p>
+      </div>
+      <div className="filter-row">
+        <select value={filterLang} onChange={e => setFilterLang(e.target.value)}>
+          <option value="">Tất cả ngôn ngữ</option>
+          {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+        </select>
+        <button className="text-button" onClick={load} disabled={loading}>⟳ Làm mới</button>
+      </div>
+    </div>
+    {error && <p className="error banner" role="alert">{error} <button onClick={load}>Thử lại</button></p>}
+    {loading ? <div className="empty"><span className="spinner" /><p>Đang tải phòng…</p></div>
+    : grouped.length === 0 ? <div className="empty"><span>✦</span><p>Chưa có phòng nào. Mentor có thể tạo phòng mới.</p></div>
+    : <div className="room-groups">
+        {grouped.map(([key, roomList]) => {
+          const lang = LANGUAGES.find(l => l.code === roomList[0].languageCode);
+          return <div key={key} className="room-group">
+            <h3>{lang?.name || roomList[0].languageCode} · Level {roomList[0].levelNumber}</h3>
+            <div className="room-cards">
+              {roomList.map(r => <button key={r.roomCode} className="room-card" onClick={() => onJoin(r.roomCode)}>
+                <span className="room-icon">🎙️</span>
+                <div>
+                  <strong>{r.title}</strong>
+                  <small>{r.roomCode} · {r.participantCount || 0} người</small>
+                </div>
+                <span className="join-badge">Tham gia →</span>
+              </button>)}
+            </div>
+          </div>;
+        })}
+      </div>}
+  </div>;
+}
+
 function RoomView({ session }: { session: Session }) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
@@ -431,6 +601,7 @@ function RoomView({ session }: { session: Session }) {
   const [hand, setHand] = useState(false);
   const [latency, setLatency] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [showBrowser, setShowBrowser] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -472,7 +643,54 @@ function RoomView({ session }: { session: Session }) {
   }
 
   const participants = useMemo(() => room?.users || [], [room]);
-  return <div className="room-layout"><section className="panel room-controls"><div className="connection"><i className={connected ? "connected" : ""} />{connected ? "Đã kết nối" : "Đang kết nối"}{latency !== null && <span>{latency} ms</span>}</div><span className="eyebrow">🎙️ Phòng học trực tiếp</span><h2>Tham gia phòng học</h2><form className="form compact" onSubmit={join}><label>Room ID<input value={roomId} onChange={event => setRoomId(event.target.value)} placeholder="english-level-1" required /></label><button className="primary-button" disabled={!connected}>{joined ? "Đã vào phòng" : "Join Room"}</button></form>{error && <p className="error" role="alert">{error}</p>}{joined && <div className="room-actions"><button className={hand ? "selected" : ""} onClick={toggleHand}>✋ {hand ? "Hạ tay" : "Giơ tay"}</button><button className={mic ? "selected" : ""} onClick={toggleMic}>{mic ? "🎤 Tắt mic" : "🔇 Bật mic"}</button><button onClick={ping}>📡 Ping</button></div>}</section><section className="panel participants"><div className="panel-title"><div><span className="eyebrow">{room?.roomId || "Room state"}</span><h2>Người tham gia</h2></div><span className="count">{participants.length}</span></div>{participants.length ? <div className="list">{participants.map(person => <article className="participant" key={person.participantId}><span className="avatar">{person.displayName[0]?.toUpperCase()}</span><div><h3>{person.displayName}</h3><p>{person.role}</p></div><div className="participant-state">{room?.raisedHands.includes(person.userId) && <span title="Đang giơ tay">✋</span>}<span title={person.micEnabled ? "Mic đang bật" : "Mic đang tắt"}>{person.micEnabled ? "🎤" : "🔇"}</span></div></article>)}</div> : <Empty text={joined ? "Chưa có người tham gia" : "Nhập mã phòng để xem người tham gia"} />}</section></div>;
+
+  if (showBrowser) {
+    return <RoomBrowser session={session} onJoin={(code) => { setRoomId(code); setShowBrowser(false); }} />;
+  }
+
+  return <div className="room-layout">
+    <section className="panel room-controls">
+      <div className="connection"><i className={connected ? "connected" : ""} />{connected ? "Đã kết nối" : "Đang kết nối"}{latency !== null && <span>{latency} ms</span>}</div>
+      <span className="eyebrow">🎙️ Phòng học trực tiếp</span>
+      <h2>Tham gia phòng học</h2>
+      <form className="form compact" onSubmit={join}>
+        <label>Room ID<input value={roomId} onChange={event => setRoomId(event.target.value)} placeholder="english-level-1" required /></label>
+        <button className="primary-button" disabled={!connected}>{joined ? "Đã vào phòng" : "Join Room"}</button>
+      </form>
+      <button className="text-button" onClick={() => setShowBrowser(true)} style={{ marginTop: 8 }}>← Danh sách phòng</button>
+      {error && <p className="error" role="alert">{error}</p>}
+      {joined && <div className="room-actions">
+        <button className={hand ? "selected" : ""} onClick={toggleHand}>✋ {hand ? "Hạ tay" : "Giơ tay"}</button>
+        <button className={mic ? "selected" : ""} onClick={toggleMic}>{mic ? "🎤 Tắt mic" : "🔇 Bật mic"}</button>
+        <button onClick={ping}>📡 Ping</button>
+      </div>}
+    </section>
+    <section className="panel participants">
+      <div className="panel-title">
+        <div>
+          <span className="eyebrow">{room?.roomId || "Room state"}</span>
+          <h2>Người tham gia</h2>
+          {room?.languageCode && room?.levelNumber != null && (
+            <small style={{ color: "var(--muted)", fontSize: 12, marginTop: 4, display: "block" }}>
+              {room.languageCode.toUpperCase()} · Level {room.levelNumber}
+            </small>
+          )}
+        </div>
+        <span className="count">{participants.length}</span>
+      </div>
+      {participants.length ? <div className="list">{participants.map(person => <article className="participant" key={person.participantId}>
+        <span className="avatar">{person.displayName[0]?.toUpperCase()}</span>
+        <div>
+          <h3>{person.displayName}</h3>
+          <p>{person.role}</p>
+        </div>
+        <div className="participant-state">
+          {room?.raisedHands.includes(person.userId) && <span title="Đang giơ tay">✋</span>}
+          <span title={person.micEnabled ? "Mic đang bật" : "Mic đang tắt"}>{person.micEnabled ? "🎤" : "🔇"}</span>
+        </div>
+      </article>)}</div> : <Empty text={joined ? "Chưa có người tham gia" : "Nhập mã phòng để xem người tham gia"} />}
+    </section>
+  </div>;
 }
 
 function Empty({ text, loading = false }: { text: string; loading?: boolean }) {

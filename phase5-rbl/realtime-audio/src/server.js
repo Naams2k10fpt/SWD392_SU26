@@ -21,6 +21,22 @@ app.use(express.json());
 
 const socketParticipants = new Map();
 
+function parseRoomCode(roomCode) {
+  // Try to extract language and level from room code patterns like:
+  // "en-s1-l5-xxx", "zh-s2-l10", "ja-l3-practice", "english-level-5"
+  const match = roomCode.match(/^(en|zh|ja)[-\s]?(?:s\d+[-\s])?l(?:evel)?[-\s]?(\d+)/i);
+  if (match) {
+    return { languageCode: match[1].toLowerCase(), levelNumber: parseInt(match[2], 10) };
+  }
+  // Try English names: "english-level-5"
+  const langMap = { english: "en", chinese: "zh", japanese: "ja" };
+  const nameMatch = roomCode.match(/^(english|chinese|japanese)[-\s]l(?:evel)?[-\s]?(\d+)/i);
+  if (nameMatch && langMap[nameMatch[1].toLowerCase()]) {
+    return { languageCode: langMap[nameMatch[1].toLowerCase()], levelNumber: parseInt(nameMatch[2], 10) };
+  }
+  return null;
+}
+
 async function ensureRoom(roomCode) {
   const [existing] = await pool.execute(
     "SELECT id, room_code, title, language_code, level_number, agora_channel_name, status, created_at FROM realtime_rooms WHERE room_code = ?",
@@ -28,9 +44,13 @@ async function ensureRoom(roomCode) {
   );
   if (existing.length > 0) return existing[0];
 
+  const parsed = parseRoomCode(roomCode);
+  const languageCode = parsed?.languageCode || "en";
+  const levelNumber = parsed?.levelNumber || 1;
+
   await pool.execute(
-    "INSERT INTO realtime_rooms (room_code, title, language_code, level_number, agora_channel_name, status) VALUES (?, ?, 'en', 1, ?, 'OPEN')",
-    [roomCode, `Room ${roomCode}`, roomCode]
+    "INSERT INTO realtime_rooms (room_code, title, language_code, level_number, agora_channel_name, status) VALUES (?, ?, ?, ?, ?, 'OPEN')",
+    [roomCode, `Room ${roomCode}`, languageCode, levelNumber, roomCode]
   );
 
   const [created] = await pool.execute(
@@ -54,6 +74,9 @@ async function serializeRoom(roomCode) {
 
   return {
     roomId: room.room_code,
+    title: room.title,
+    languageCode: room.language_code,
+    levelNumber: room.level_number,
     createdAt: room.created_at,
     users: participants.map(participant => ({
       participantId: participant.id,
@@ -93,12 +116,75 @@ app.post("/agora/token", async (request, response, next) => {
   }
 });
 
-app.get("/rooms", async (_request, response, next) => {
+app.get("/rooms", async (request, response, next) => {
   try {
-    const [rooms] = await pool.execute(
-      "SELECT room_code FROM realtime_rooms WHERE status = 'OPEN' ORDER BY created_at"
-    );
+    let sql = "SELECT room_code FROM realtime_rooms WHERE status = 'OPEN'";
+    const params = [];
+    if (request.query.language) {
+      sql += " AND language_code = ?";
+      params.push(request.query.language);
+    }
+    if (request.query.level) {
+      sql += " AND level_number = ?";
+      params.push(Number(request.query.level));
+    }
+    sql += " ORDER BY created_at";
+    const [rooms] = await pool.execute(sql, params);
     response.json({ rooms: await Promise.all(rooms.map(room => serializeRoom(room.room_code))) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/rooms", async (request, response, next) => {
+  try {
+    const { roomCode, title, languageCode, levelNumber } = request.body;
+    if (!roomCode || !languageCode || levelNumber === undefined) {
+      response.status(400).json({ message: "roomCode, languageCode and levelNumber are required" });
+      return;
+    }
+    if (!["en", "zh", "ja"].includes(languageCode)) {
+      response.status(400).json({ message: "languageCode must be 'en', 'zh', or 'ja'" });
+      return;
+    }
+    if (typeof levelNumber !== "number" || levelNumber < 1) {
+      response.status(400).json({ message: "levelNumber must be a positive number" });
+      return;
+    }
+
+    const [existing] = await pool.execute(
+      "SELECT id FROM realtime_rooms WHERE room_code = ?", [roomCode]
+    );
+    if (existing.length > 0) {
+      response.status(409).json({ message: "Room code already exists" });
+      return;
+    }
+
+    const displayTitle = title || `${languageCode.toUpperCase()} Level ${levelNumber}`;
+    await pool.execute(
+      "INSERT INTO realtime_rooms (room_code, title, language_code, level_number, agora_channel_name, status) VALUES (?, ?, ?, ?, ?, 'OPEN')",
+      [roomCode, displayTitle, languageCode, levelNumber, roomCode]
+    );
+
+    const [created] = await pool.execute(
+      "SELECT id, room_code, title, language_code, level_number, agora_channel_name, status, created_at FROM realtime_rooms WHERE room_code = ?",
+      [roomCode]
+    );
+    response.status(201).json(created[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/rooms/levels", async (_request, response, next) => {
+  try {
+    const [groups] = await pool.execute(
+      `SELECT language_code, level_number, COUNT(*) as room_count
+       FROM realtime_rooms WHERE status = 'OPEN'
+       GROUP BY language_code, level_number
+       ORDER BY language_code, level_number`
+    );
+    response.json({ groups });
   } catch (error) {
     next(error);
   }
@@ -196,6 +282,10 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(port, () => {
-  console.log(`RBL Phase 2 real-time audio MVP listening on ${port}`);
-});
+if (!process.env.LUCY_TEST) {
+  server.listen(port, () => {
+    console.log(`RBL Phase 2 real-time audio MVP listening on ${port}`);
+  });
+}
+
+export { app, parseRoomCode, server };

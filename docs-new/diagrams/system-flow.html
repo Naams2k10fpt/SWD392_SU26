@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="System Flow — LUCY SWD392: Auth, Wallet, Realtime, LMS services interconnected with MariaDB. Vietnamese.">
+<title>System Flow — LUCY SWD392</title>
+<script>
+  (function () {
+    const saved = localStorage.getItem('theme');
+    const dark = saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', dark);
+  })();
+</script>
+<style>
+  :root {
+    --bg: #FAF9F5; --surface: #FFFFFF; --surface2: #F0EEE6;
+    --ink: #141413; --body: #3D3D3A; --muted: #87867F;
+    --line: #D1CFC5; --line-soft: #E6E3DA;
+    --clay: #D97757; --clay-soft: rgba(217,119,87,0.10);
+    --olive: #788C5D; --olive-soft: rgba(120,140,93,0.12);
+    --gold: #C9A45C; --blue: #5B7E96;
+    --zone: rgba(20,20,19,0.025); --zone-line: #D1CFC5;
+    --serif: ui-serif, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  html.dark {
+    --bg: #141413; --surface: #1F1F1D; --surface2: #2A2A28;
+    --ink: #FAF9F5; --body: #D1CFC5; --muted: #87867F;
+    --line: #3D3D3A; --line-soft: #2A2A28;
+    --clay: #E48A6E; --clay-soft: rgba(228,138,110,0.14);
+    --olive: #9DB07C; --olive-soft: rgba(157,176,124,0.16);
+    --gold: #D4B36F; --blue: #7FA3BC;
+    --zone: rgba(250,249,245,0.03); --zone-line: #3D3D3A;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--body); font-family: var(--sans);
+    -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* ── top bar ─────────────────────────────── */
+  .bar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 20px; border-bottom: 1px solid var(--line-soft); flex: none;
+  }
+  .bar h1 { font-family: var(--serif); font-weight: 500; font-size: 19px; color: var(--ink); letter-spacing: -0.01em; }
+  .bar .sub { font-family: var(--mono); font-size: 10.5px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+  .spacer { flex: 1; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em;
+    padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px;
+    background: transparent; color: var(--muted); cursor: pointer; transition: all .15s ease;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--muted); }
+  .chip.on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+  #themeToggle {
+    font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px;
+    background: transparent; color: var(--muted); cursor: pointer;
+  }
+  #themeToggle:hover { color: var(--ink); border-color: var(--muted); }
+
+  /* ── stage ───────────────────────────────── */
+  .stage { flex: 1; position: relative; min-height: 0; }
+
+  /* canvas container (zoom/pan) */
+  .canvas-container {
+    position: absolute; inset: 0; overflow: hidden;
+    cursor: grab;
+  }
+  .canvas-container:active { cursor: grabbing; }
+  .stage svg { display: block; overflow: visible; user-select: none; }
+
+  /* zoom controls */
+  .zoom-controls {
+    position: absolute; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 10;
+  }
+  .zoom-btn {
+    width: 36px; height: 36px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; color: var(--ink);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05); transition: all 0.15s ease;
+  }
+  .zoom-btn:hover { border-color: var(--muted); transform: translateY(-1px); }
+
+  /* zones */
+  .zone rect { fill: var(--zone); stroke: var(--zone-line); stroke-width: 1; stroke-dasharray: 5 5; rx: 16; }
+  .zone .ztitle { font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; fill: var(--muted); }
+  .zone .zsub { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); opacity: 0.75; }
+
+  /* nodes */
+  .node { cursor: pointer; }
+  .node rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; rx: 10; transition: stroke .15s ease, filter .15s ease; }
+  .node:hover rect { stroke: var(--muted); }
+  .node.sel rect { stroke: var(--clay) !important; stroke-width: 2; }
+  .node .t  { font-family: var(--sans); font-size: 14.5px; font-weight: 600; fill: var(--ink); pointer-events: none; }
+  .node .m  { font-family: var(--mono); font-size: 11px; fill: var(--muted); pointer-events: none; }
+  .node .k  { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; fill: var(--clay); pointer-events: none; }
+  .node.gate rect { fill: var(--clay-soft); stroke: var(--clay); }
+  .node.store rect { fill: var(--surface2); }
+  .node.do rect { fill: var(--olive-soft); stroke: var(--olive); }
+  .node.ext rect { stroke-dasharray: 6 3; }
+
+  /* edges */
+  .edge { stroke: var(--muted); stroke-width: 1.6; fill: none; marker-end: url(#a-mut); transition: opacity .2s ease, stroke .2s ease; }
+  .edge.dash { stroke-dasharray: 5 4; }
+  .edge.ws { stroke-width: 2; }
+  .elbl { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); transition: opacity .2s ease; }
+
+  /* flow highlighting */
+  .stage.flowing .edge { opacity: 0.13; }
+  .stage.flowing .elbl { opacity: 0.13; }
+  .stage.flowing .node { opacity: 0.30; }
+  .stage.flowing .zone { opacity: 0.45; }
+  .stage.flowing .edge.lit {
+    opacity: 1; stroke: var(--clay); marker-end: url(#a-clay);
+    stroke-dasharray: 7 5; animation: march 0.9s linear infinite;
+  }
+  .stage.flowing .elbl.lit { opacity: 1; fill: var(--clay); }
+  .stage.flowing .node.lit { opacity: 1; }
+  .stage.flowing .node.lit rect { stroke: var(--clay); }
+  @keyframes march { to { stroke-dashoffset: -12; } }
+  @media (prefers-reduced-motion: reduce) { .stage.flowing .edge.lit { animation: none; } }
+
+  .badge { font-family: var(--mono); font-size: 11px; font-weight: 700; }
+  .badge circle { fill: var(--clay); }
+  .badge text { fill: var(--bg); }
+  .stage:not(.flowing) .badge { display: none; }
+
+  /* ── floating cards ──────────────────────── */
+  .card {
+    position: absolute; max-width: 360px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.08);
+  }
+  #detail { right: 16px; bottom: 16px; width: 340px; }
+  #detail h3 { font-family: var(--serif); font-weight: 500; font-size: 17px; color: var(--ink); margin-bottom: 2px; }
+  #detail .meta { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-bottom: 8px; }
+  #detail p { font-size: 12.5px; line-height: 1.55; }
+  #detail p code, #flowcap code { font-family: var(--mono); font-size: 11px; color: var(--clay); }
+  #flowcap { left: 16px; bottom: 16px; max-width: 460px; display: none; }
+  #flowcap.show { display: block; }
+  #flowcap .fname { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--clay); margin-bottom: 6px; }
+  #flowcap ol { margin-left: 18px; }
+  #flowcap li { font-size: 12.5px; line-height: 1.55; }
+  .src { position: absolute; top: 10px; right: 16px; font-family: var(--mono); font-size: 10px; color: var(--muted); opacity: 0.8; }
+  @media (max-width: 880px) {
+    body { overflow: auto; }
+    .stage { min-height: 70vh; }
+    #detail { position: static; width: auto; margin: 10px 16px; }
+    #flowcap { position: static; margin: 0 16px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div>
+    <h1>System Flow — Architecture Overview</h1>
+    <div class="sub">LUCY SWD392 · 4 SERVICES</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="chips" id="chips">
+    <button class="chip on" data-flow="all">All</button>
+    <button class="chip" data-flow="auth">Auth Service</button>
+    <button class="chip" data-flow="wallet">Wallet Service</button>
+    <button class="chip" data-flow="realtime">Realtime Service</button>
+    <button class="chip" data-flow="lms">LMS Service</button>
+  </div>
+  <button id="themeToggle">☾</button>
+</div>
+
+<div class="stage" id="stage">
+  <div class="canvas-container" id="canvas-container">
+  <svg viewBox="0 0 1900 1280" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <marker id="a-mut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"/>
+    </marker>
+    <marker id="a-clay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--clay)"/>
+    </marker>
+  </defs>
+  <g id="viewport">
+
+  <!-- ── zones ─────────────────────────────── -->
+  <g class="zone" id="z-clients">
+    <rect x="40" y="100" width="300" height="900"/>
+    <text class="ztitle" x="60" y="130">Client Layer</text>
+    <text class="zsub" x="60" y="148">Flutter · Web · cURL</text>
+  </g>
+  <g class="zone" id="z-gateway">
+    <rect x="370" y="100" width="260" height="900"/>
+    <text class="ztitle" x="390" y="130">API Services</text>
+    <text class="zsub" x="390" y="148">Routing &amp; authentication</text>
+  </g>
+  <g class="zone" id="z-services">
+    <rect x="660" y="100" width="580" height="900"/>
+    <text class="ztitle" x="680" y="130">Business Services</text>
+    <text class="zsub" x="680" y="148">Auth · Wallet · Realtime · LMS</text>
+  </g>
+  <g class="zone" id="z-stores">
+    <rect x="1270" y="100" width="580" height="900"/>
+    <text class="ztitle" x="1290" y="130">Data Layer</text>
+    <text class="zsub" x="1290" y="148">MariaDB 12.2</text>
+  </g>
+
+  <!-- ── edges ─────────────────────────────── -->
+  <path class="edge" id="e-flutter-auth"     d="M 340,200 L 390,200"/>
+  <path class="edge" id="e-flutter-wallet"   d="M 340,320 L 390,320"/>
+  <path class="edge" id="e-flutter-realtime" d="M 340,440 L 390,440"/>
+  <path class="edge" id="e-flutter-lms"      d="M 340,560 L 390,560"/>
+  <path class="edge" id="e-gateway-auth"     d="M 630,200 L 680,200"/>
+  <path class="edge" id="e-gateway-wallet"   d="M 630,320 L 680,320"/>
+  <path class="edge" id="e-gateway-realtime" d="M 630,440 L 680,440"/>
+  <path class="edge" id="e-auth-db"          d="M 910,200 L 1290,200"/>
+  <path class="edge" id="e-wallet-db"        d="M 910,320 L 1290,320"/>
+  <path class="edge" id="e-realtime-db"      d="M 910,440 L 1290,440"/>
+  <path class="edge" id="e-lms-db"           d="M 910,560 L 1290,560"/>
+
+  <!-- edge labels -->
+  <text class="elbl" data-e="e-flutter-auth"     x="365" y="192">HTTP :5000</text>
+  <text class="elbl" data-e="e-flutter-wallet"   x="365" y="312">HTTP :5040</text>
+  <text class="elbl" data-e="e-flutter-realtime" x="365" y="432">WS :3020</text>
+  <text class="elbl" data-e="e-flutter-lms"      x="365" y="552">Console</text>
+  <text class="elbl" data-e="e-gateway-auth"     x="655" y="192">POST /auth</text>
+  <text class="elbl" data-e="e-gateway-wallet"   x="655" y="312">POST /wallet</text>
+  <text class="elbl" data-e="e-gateway-realtime" x="655" y="432">Socket.IO</text>
+  <text class="elbl" data-e="e-auth-db"          x="1100" y="192" text-anchor="middle">lucy_phase1</text>
+  <text class="elbl" data-e="e-wallet-db"        x="1100" y="312" text-anchor="middle">lucy_wallet</text>
+  <text class="elbl" data-e="e-realtime-db"      x="1100" y="432" text-anchor="middle">lucy_realtime</text>
+  <text class="elbl" data-e="e-lms-db"           x="1100" y="552" text-anchor="middle">lucy_lms</text>
+
+  <!-- ── nodes: clients ────────────────────── -->
+  <g class="node" data-k="flutter_app">
+    <rect x="60" y="170" width="260" height="60"/>
+    <text class="t" x="80" y="198">Flutter App</text>
+    <text class="m" x="80" y="216">Mobile user</text>
+  </g>
+  <g class="node" data-k="web_client">
+    <rect x="60" y="290" width="260" height="60"/>
+    <text class="t" x="80" y="318">Web / cURL / Postman</text>
+    <text class="m" x="80" y="336">REST API &amp; WebSocket client</text>
+  </g>
+  <g class="node" data-k="mentor_console">
+    <rect x="60" y="530" width="260" height="60"/>
+    <text class="t" x="80" y="558">Mentor Console</text>
+    <text class="m" x="80" y="576">Java Spring Boot (LMS)</text>
+  </g>
+
+  <!-- ── nodes: gateway ────────────────────── -->
+  <g class="node gate" data-k="api_gateway">
+    <rect x="390" y="200" width="220" height="350"/>
+    <text class="t" x="410" y="230">API Gateway</text>
+    <text class="m" x="410" y="252">JWT authentication</text>
+    <text class="m" x="410" y="272">Request routing</text>
+    <text class="m" x="410" y="292">Role check</text>
+    <text class="m" x="410" y="312">Rate limiting</text>
+    <text class="m" x="410" y="332">Forward X-User-Id</text>
+  </g>
+
+  <!-- ── nodes: services ───────────────────── -->
+  <g class="node gate" data-k="auth_svc">
+    <rect x="680" y="170" width="220" height="70"/>
+    <text class="t" x="700" y="198">Auth Service (.NET :5000)</text>
+    <text class="m" x="700" y="218">Register · Login · JWT</text>
+  </g>
+  <g class="node gate" data-k="wallet_svc">
+    <rect x="680" y="290" width="220" height="70"/>
+    <text class="t" x="700" y="318">Wallet Service (.NET :5040)</text>
+    <text class="m" x="700" y="338">Wallet · Top-up · Gift</text>
+  </g>
+  <g class="node gate" data-k="realtime_svc">
+    <rect x="680" y="410" width="220" height="70"/>
+    <text class="t" x="700" y="438">Realtime Service (Node.js :3020)</text>
+    <text class="m" x="700" y="458">Socket.IO · Rooms · Events</text>
+  </g>
+  <g class="node gate" data-k="lms_svc">
+    <rect x="680" y="530" width="220" height="70"/>
+    <text class="t" x="700" y="558">LMS Service (Java Console)</text>
+    <text class="m" x="700" y="578">State Pattern · Dashboard</text>
+  </g>
+
+  <!-- ── nodes: stores ─────────────────────── -->
+  <g class="node store" data-k="mariadb_phase1">
+    <rect x="1290" y="170" width="540" height="60"/>
+    <text class="t" x="1310" y="198">MariaDB — lucy_phase1 (Auth)</text>
+    <text class="m" x="1310" y="216">users · user_roles · roles</text>
+  </g>
+  <g class="node store" data-k="mariadb_wallet">
+    <rect x="1290" y="290" width="540" height="60"/>
+    <text class="t" x="1310" y="318">MariaDB — lucy_wallet</text>
+    <text class="m" x="1310" y="336">wallet_accounts · gift_transactions · podcast_recordings</text>
+  </g>
+  <g class="node store" data-k="mariadb_realtime">
+    <rect x="1290" y="410" width="540" height="60"/>
+    <text class="t" x="1310" y="438">MariaDB — lucy_realtime</text>
+    <text class="m" x="1310" y="456">room_participants · room_events · latency_logs</text>
+  </g>
+  <g class="node store" data-k="mariadb_lms">
+    <rect x="1290" y="530" width="540" height="60"/>
+    <text class="t" x="1310" y="558">MariaDB — lucy_lms</text>
+    <text class="m" x="1310" y="576">sessions · session_state · learner_progress</text>
+  </g>
+  </g>
+  </svg>
+  </div> <!-- /canvas-container -->
+
+  <div class="zoom-controls">
+    <button class="zoom-btn" id="zoom-in">+</button>
+    <button class="zoom-btn" id="zoom-reset">⟲</button>
+    <button class="zoom-btn" id="zoom-out">-</button>
+  </div>
+
+  <div class="src">LUCY SWD392/system-flow · System Overview</div>
+
+  <div class="card" id="flowcap">
+    <div class="fname" id="f-name"></div>
+    <ol id="f-steps"></ol>
+  </div>
+
+  <div class="card" id="detail">
+    <h3 id="d-title">Click a node</h3>
+    <div class="meta" id="d-meta">Node Details</div>
+    <p id="d-body">Mỗi ô đều có thể click. Click các luồng phía trên để xem đường đi của từng dịch vụ.</p>
+  </div>
+</div>
+<script>
+const DETAIL = {
+  flutter_app: { t: "Flutter App", m: "Mobile App", b: "Ứng dụng di động Flutter kết nối tới tất cả services qua API Gateway. Gửi JWT token trong header để xác thực." },
+  web_client: { t: "Web / cURL / Postman", m: "REST & WebSocket Client", b: "Trình duyệt web và REST clients. Kết nối HTTP tới Auth/Wallet, WebSocket tới Realtime Service." },
+  mentor_console: { t: "Mentor Console", m: "Java Spring Boot Console", b: "Giao diện console cho mentor. Chạy <code>MentorDashboard</code> để xem tiến độ học tập." },
+  api_gateway: { t: "API Gateway", m: "Routing & Authentication", b: "Điểm vào trung tâm. Xác thực JWT (RSA 256), kiểm tra vai trò, rate limiting, chuyển tiếp <code>X-User-Id</code> và <code>X-User-Roles</code> đến services." },
+  auth_svc: { t: "Auth Service (.NET :5000)", m: "Auth Service", b: "Xử lý đăng ký, đăng nhập, cấp JWT. Dùng <code>PasswordHasher</code> (HMAC-SHA256) và <code>JwtHandler</code>. Lưu dữ liệu trong <code>lucy_phase1</code>." },
+  wallet_svc: { t: "Wallet Service (.NET :5040)", m: "Wallet Service", b: "Quản lý ví, nạp tiền, tặng quà. Dùng <code>Transaction Manager</code> cho giao dịch nguyên tử và <code>Balance Validator</code> để ngăn thấu chi." },
+  realtime_svc: { t: "Realtime Service (Node.js :3020)", m: "Realtime Service", b: "Socket.IO server cho phòng học tương tác. Xử lý vào phòng, giơ tay, bật/tắt mic, ping. Lưu sự kiện trong <code>lucy_realtime</code>." },
+  lms_svc: { t: "LMS Service (Java Console)", m: "LMS Service", b: "Ứng dụng console với state pattern. Điều phối 4 giai đoạn: WarmUp → GuidedPractice → PeerExchange → Reflection." },
+  mariadb_phase1: { t: "MariaDB — lucy_phase1", m: "Auth Database (Port 3306)", b: "MariaDB 12.2 lưu <code>users</code>, <code>user_roles</code>, <code>roles</code>. Dùng cho xác thực và phân quyền." },
+  mariadb_wallet: { t: "MariaDB — lucy_wallet", m: "Wallet Database", b: "MariaDB 12.2 lưu <code>wallet_accounts</code>, <code>gift_transactions</code>, <code>podcast_recordings</code>." },
+  mariadb_realtime: { t: "MariaDB — lucy_realtime", m: "Realtime Database", b: "MariaDB 12.2 lưu <code>room_participants</code>, <code>room_events</code>, <code>latency_logs</code>." },
+  mariadb_lms: { t: "MariaDB — lucy_lms", m: "LMS Database", b: "MariaDB 12.2 lưu <code>sessions</code>, <code>session_state</code>, <code>learner_progress</code>." }
+};
+
+const FLOWS = {
+  auth: {
+    name: "Dịch Vụ Xác Thực",
+    edges: ["e-flutter-auth","e-gateway-auth","e-auth-db"],
+    nodes: ["flutter_app","api_gateway","auth_svc","mariadb_phase1"],
+    steps: [
+      "Người dùng gửi request đăng nhập/đăng ký từ Flutter App.",
+      "API Gateway xác thực và điều hướng tới Auth Service (:5000).",
+      "Auth Service xử lý đăng ký/đăng nhập, tạo JWT token.",
+      "Thông tin user lưu vào MariaDB <code>lucy_phase1</code>.",
+      "JWT token trả về client qua Gateway."
+    ]
+  },
+  wallet: {
+    name: "Dịch Vụ Ví",
+    edges: ["e-flutter-wallet","e-gateway-wallet","e-wallet-db"],
+    nodes: ["flutter_app","api_gateway","wallet_svc","mariadb_wallet"],
+    steps: [
+      "Người dùng thao tác ví (xem số dư, nạp tiền, tặng quà).",
+      "API Gateway điều hướng tới Wallet Service (:5040) kèm X-User-Id.",
+      "Wallet Service xử lý giao dịch: kiểm tra số dư, tạo giao dịch nguyên tử.",
+      "Dữ liệu ví lưu vào MariaDB <code>lucy_wallet</code>.",
+      "Kết quả trả về client."
+    ]
+  },
+  realtime: {
+    name: "Dịch Vụ Realtime",
+    edges: ["e-flutter-realtime","e-gateway-realtime","e-realtime-db"],
+    nodes: ["web_client","api_gateway","realtime_svc","mariadb_realtime"],
+    steps: [
+      "Người dùng kết nối WebSocket tới Realtime Server qua Gateway.",
+      "Socket.IO thiết lập kết nối, xác thực token.",
+      "User tham gia phòng, gửi/nhận sự kiện (giơ tay, mic, ping).",
+      "Sự kiện được ghi vào MariaDB <code>lucy_realtime</code>.",
+      "Các user khác trong phòng nhận được cập nhật realtime."
+    ]
+  },
+  lms: {
+    name: "Dịch Vụ LMS",
+    edges: ["e-flutter-lms","e-gateway-realtime","e-lms-db"],
+    nodes: ["mentor_console","lms_svc","mariadb_lms"],
+    steps: [
+      "Mentor chạy LMS Console để xem dashboard.",
+      "LMS Service khởi tạo state engine với 4 giai đoạn học tập.",
+      "Học viên tiến qua các giai đoạn: WarmUp → GuidedPractice → PeerExchange → Reflection.",
+      "Mỗi bước chuyển được ghi vào MariaDB <code>lucy_lms</code>.",
+      "Mentor theo dõi tiến độ qua MentorDashboard."
+    ]
+  }
+};
+
+const stage = document.getElementById('stage');
+const nodes = document.querySelectorAll('.node');
+const edges = document.querySelectorAll('.edge');
+const elbls = document.querySelectorAll('.elbl');
+const chips = document.querySelectorAll('.chip');
+const fcap = document.getElementById('flowcap');
+
+function setFlow(key) {
+  chips.forEach(c => c.classList.toggle('on', c.dataset.flow === key));
+  edges.forEach(e => e.classList.remove('lit'));
+  elbls.forEach(l => l.classList.remove('lit'));
+  nodes.forEach(n => n.classList.remove('lit'));
+  if (key === 'all') { stage.classList.remove('flowing'); fcap.classList.remove('show'); return; }
+  const f = FLOWS[key];
+  if (!f) return;
+  stage.classList.add('flowing');
+  f.edges.forEach(id => document.getElementById(id)?.classList.add('lit'));
+  elbls.forEach(l => { if (f.edges.includes(l.dataset.e)) l.classList.add('lit'); });
+  f.nodes.forEach(k => document.querySelector(".node[data-k='" + k + "']")?.classList.add('lit'));
+  document.getElementById('f-name').textContent = f.name;
+  document.getElementById('f-steps').innerHTML = f.steps.map(s => "<li>" + s + "</li>").join('');
+  fcap.classList.add('show');
+}
+chips.forEach(c => c.addEventListener('click', () => setFlow(c.dataset.flow)));
+
+nodes.forEach(n => n.addEventListener('click', () => {
+  nodes.forEach(x => x.classList.remove('sel'));
+  n.classList.add('sel');
+  const d = DETAIL[n.dataset.k];
+  if (!d) return;
+  document.getElementById('d-title').textContent = d.t;
+  document.getElementById('d-meta').textContent = d.m;
+  document.getElementById('d-body').innerHTML = d.b;
+}));
+
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const dark = !document.documentElement.classList.contains('dark');
+  document.documentElement.classList.toggle('dark', dark);
+  localStorage.setItem('theme', dark ? 'dark' : 'light');
+});
+
+// Zoom and Pan Logic
+let scale = 1;
+let translateX = 0;
+let translateY = 0;
+let isDragging = false;
+let startX, startY;
+const container = document.getElementById('canvas-container');
+const viewport = document.getElementById('viewport');
+
+function updateTransform() {
+  viewport.setAttribute('transform', `translate(${translateX}, ${translateY}) scale(${scale})`);
+}
+
+container.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.node') || e.target.closest('.zoom-controls') || e.target.closest('.bottom-panel') || e.target.closest('.card')) return;
+  isDragging = true;
+  startX = e.clientX - translateX;
+  startY = e.clientY - translateY;
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  translateX = e.clientX - startX;
+  translateY = e.clientY - startY;
+  updateTransform();
+});
+
+window.addEventListener('mouseup', () => { isDragging = false; });
+window.addEventListener('mouseleave', () => { isDragging = false; });
+
+container.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const scaleChange = e.deltaY > 0 ? 0.9 : 1.1;
+  const newScale = Math.min(Math.max(0.3, scale * scaleChange), 3);
+  
+  const rect = container.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const mouseY = e.clientY - rect.top;
+  
+  translateX = mouseX - (mouseX - translateX) * (newScale / scale);
+  translateY = mouseY - (mouseY - translateY) * (newScale / scale);
+  scale = newScale;
+  
+  updateTransform();
+}, { passive: false });
+
+// Auto center on load
+setTimeout(() => {
+  const rect = container.getBoundingClientRect();
+  const svgW = 1900;
+  const svgH = 1280;
+  scale = rect.width < svgW ? rect.width / (svgW + 100) : 1; 
+  translateX = (rect.width - svgW * scale) / 2; 
+  translateY = (rect.height - svgH * scale) / 2; 
+  updateTransform();
+}, 50);
+
+document.getElementById('zoom-in').addEventListener('click', () => { scale = Math.min(scale * 1.2, 3); updateTransform(); });
+document.getElementById('zoom-out').addEventListener('click', () => { scale = Math.max(scale * 0.8, 0.3); updateTransform(); });
+document.getElementById('zoom-reset').addEventListener('click', () => { 
+  const rect = container.getBoundingClientRect();
+  const svgW = 1900;
+  const svgH = 1280;
+  scale = rect.width < svgW ? rect.width / (svgW + 100) : 1; 
+  translateX = (rect.width - svgW * scale) / 2; 
+  translateY = (rect.height - svgH * scale) / 2; 
+  updateTransform();
+});
+</script>
+</body>
+</html>
