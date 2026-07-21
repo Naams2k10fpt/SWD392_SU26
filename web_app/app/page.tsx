@@ -216,7 +216,7 @@ export default function LucyPage() {
     )
   ) : (
     <AppShell route={route} session={session} logout={logout} onCreateRoom={() => setShowCreateRoom(true)}>
-      {route === "/room" && <RoomView session={session} />}
+      {route === "/room" && <RoomView session={session} onCreateRoom={() => setShowCreateRoom(true)} />}
       {route === "/wallet" && <WalletView session={session} notify={notify} />}
       {route === "/gifts" && <GiftsView session={session} notify={notify} />}
       {route === "/podcasts" && <PodcastsView session={session} notify={notify} />}
@@ -529,7 +529,7 @@ function CreateRoomDialog({ onClose, session }: { onClose: () => void; session: 
   </div>;
 }
 
-function RoomBrowser({ session, onJoin, connected }: { session: Session; onJoin: (roomCode: string) => void; connected: boolean }) {
+function RoomBrowser({ session, onJoin, connected, onCreateRoom }: { session: Session; onJoin: (roomCode: string) => void; connected: boolean; onCreateRoom?: () => void }) {
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -573,6 +573,8 @@ function RoomBrowser({ session, onJoin, connected }: { session: Session; onJoin:
     if (manualId.trim()) onJoin(manualId.trim());
   }
 
+  const canCreate = session.user.role === "PRO" || session.user.role === "SUPER";
+
   return <div className="room-browser">
     <div className="section-heading">
       <div>
@@ -580,6 +582,7 @@ function RoomBrowser({ session, onJoin, connected }: { session: Session; onJoin:
         <h2>Danh sách phòng</h2>
         <p>Chọn phòng hoặc nhập mã phòng để tham gia.</p>
       </div>
+      {canCreate && <button className="primary-button fit" onClick={onCreateRoom}>＋ Tạo phòng</button>}
     </div>
     <form className="form compact" onSubmit={handleManualJoin} style={{ margin: '0 0 16px', display: 'flex', gap: 8 }}>
       <input value={manualId} onChange={e => setManualId(e.target.value)} placeholder="Nhập mã phòng..." className="input" style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)' }} />
@@ -593,8 +596,9 @@ function RoomBrowser({ session, onJoin, connected }: { session: Session; onJoin:
       <button className="text-button" onClick={load} disabled={loading}>⟳ Làm mới</button>
     </div>
     {error && <p className="error banner" role="alert">{error} <button onClick={load}>Thử lại</button></p>}
+    {!connected && !loading && <p className="error banner" role="alert">⚠️ Chưa kết nối được server. Đợi kết nối hoặc refresh trang.</p>}
     {loading ? <div className="empty"><span className="spinner" /><p>Đang tải phòng…</p></div>
-    : grouped.length === 0 ? <div className="empty"><span>✦</span><p>Chưa có phòng nào. Mentor có thể tạo phòng mới.</p></div>
+    : grouped.length === 0 ? <div className="empty"><span>✦</span><p>Chưa có phòng nào.</p></div>
     : <div className="room-groups">
         {grouped.map(([key, roomList]) => {
           const lang = LANGUAGES.find(l => l.code === roomList[0].languageCode);
@@ -607,7 +611,7 @@ function RoomBrowser({ session, onJoin, connected }: { session: Session; onJoin:
                   <strong>{r.title}</strong>
                   <small>{r.roomCode} · {r.participantCount || 0} người</small>
                 </div>
-                <span className="join-badge">Tham gia →</span>
+                <span className="join-badge">{connected ? "Tham gia →" : "..."}</span>
               </button>)}
             </div>
           </div>;
@@ -616,7 +620,7 @@ function RoomBrowser({ session, onJoin, connected }: { session: Session; onJoin:
   </div>;
 }
 
-function RoomView({ session }: { session: Session }) {
+function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: () => void }) {
   const socketRef = useRef<Socket | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
@@ -897,6 +901,12 @@ function RoomView({ session }: { session: Session }) {
     setRoomId(code);
     setShowBrowser(false);
     setJoined(true);
+    if (!s.connected) {
+      setJoined(false);
+      setShowBrowser(true);
+      setError("Chưa kết nối được server. Vui lòng đợi hoặc refresh.");
+      return;
+    }
     s.emit("room:join", { roomId: code, userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
       if (!result?.ok) { setJoined(false); setShowBrowser(true); return; }
       setError("");
@@ -913,7 +923,7 @@ function RoomView({ session }: { session: Session }) {
   }
 
   if (showBrowser) {
-    return <RoomBrowser session={session} onJoin={joinRoom} connected={connected} />;
+    return <RoomBrowser session={session} onJoin={joinRoom} connected={connected} onCreateRoom={onCreateRoom} />;
   }
 
   return <div className="room-layout">
