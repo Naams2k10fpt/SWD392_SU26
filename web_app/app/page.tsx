@@ -639,6 +639,7 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
   const [chatInput, setChatInput] = useState("");
   const [recording, setRecording] = useState<RecordingState>({ status: 'NONE' });
   const [remoteUsers, setRemoteUsers] = useState<{ userId: string; displayName: string }[]>([]);
+  const [chatOpen, setChatOpen] = useState(true);
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
@@ -925,122 +926,171 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
     return <RoomBrowser session={session} onJoin={joinRoom} connected={connected} onCreateRoom={onCreateRoom} />;
   }
 
-  return <div className="room-layout">
-    <section className="panel room-controls">
-      <div className="connection"><i className={connected ? "connected" : ""} />{connected ? "Đã kết nối" : "Đang kết nối"}{latency !== null && <span>{latency} ms</span>}</div>
-      <span className="eyebrow">🎙️ Phòng học trực tiếp</span>
-      <h2>📌 {room?.title || roomId}</h2>
-      <div style={{ margin: '12px 0', fontSize: 14, color: 'var(--muted)' }}>
-        {room?.languageCode === "en" ? "English" : room?.languageCode === "zh" ? "Chinese" : "Japanese"} · Stage {Math.ceil((room?.levelNumber || 1) / 30)} · Level {room?.levelNumber}
+  return <div className="room-view">
+    {/* ── Topbar ── */}
+    <header className="room-topbar">
+      <button className="room-back" onClick={() => setShowBrowser(true)}>
+        ← Danh sách phòng
+      </button>
+      <div className="room-topbar-info">
+        <h1>{room?.title || roomId}</h1>
+        <div className="room-meta">
+          <span>{room?.languageCode === "en" ? "English" : room?.languageCode === "zh" ? "Chinese" : "Japanese"}</span>
+          <span className="meta-dot">·</span>
+          <span>Level {room?.levelNumber}</span>
+          <span className="meta-dot">·</span>
+          <span>Stage {Math.ceil((room?.levelNumber || 1) / 30)}</span>
+        </div>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
-      {joined && <div className="room-actions">
-        <button className={hand ? "selected" : ""} onClick={toggleHand}>✋ {hand ? "Hạ tay" : "Giơ tay"}</button>
-        <button className={mic ? "selected" : ""} onClick={toggleMic}>{mic ? "🎤 Tắt mic" : "🔇 Bật mic"}</button>
-        <button onClick={ping}>📡 Ping</button>
-      </div>}
-    </section>
-    <section className="panel participants">
-      <div className="panel-title">
-        <div>
-          <span className="eyebrow">{room?.roomId || "Room state"}</span>
-          <h2>Người tham gia</h2>
-          {room?.languageCode && room?.levelNumber != null && (
-            <small style={{ color: "var(--muted)", fontSize: 12, marginTop: 4, display: "block" }}>
-              {room.languageCode === "en" ? "English" : room.languageCode === "zh" ? "Chinese" : "Japanese"} · Stage {Math.ceil(room.levelNumber / 30)} · Level {room.levelNumber}
-            </small>
-          )}
-        </div>
-        <span className="count">{participants.length}</span>
+      <div className={`room-connection${connected ? " connected" : ""}`}>
+        <i />
+        <span>{connected ? "Đã kết nối" : "Đang kết nối"}</span>
+        {latency !== null && <span className="room-latency">{latency}ms</span>}
       </div>
-      {participants.length ? <div className="list">{participants.map(person => <article className="participant" key={person.participantId}>
-        <span className="avatar">{person.displayName[0]?.toUpperCase()}</span>
-        <div>
-          <h3>{person.displayName}</h3>
-          <p>{person.role}</p>
-        </div>
-        <div className="participant-state">
-          {room?.raisedHands.includes(person.userId) && <span title="Đang giơ tay">✋</span>}
-          <span title={person.micEnabled ? "Mic đang bật" : "Mic đang tắt"}>{person.micEnabled ? "🎤" : "🔇"}</span>
-          {person.userId !== session.user.id && <audio ref={el => { if (el) { remoteAudioRefs.current.set(person.userId, el); const s = remoteStreamsRef.current.get(person.userId); if (s && el.srcObject !== s) { el.srcObject = s; el.play().catch(() => {}); } } }} autoPlay playsInline style={{ width: 0, height: 0, position: 'absolute' }} />}
-        </div>
-      </article>)}</div> : <Empty text={joined ? "Chưa có người tham gia" : "Nhập mã phòng để xem người tham gia"} />}
-    </section>
-    <section className="panel chat-panel">
-      <div className="panel-title">
-        <div>
-          <span className="eyebrow">{recording.status === 'RECORDING' ? '🔴 Đang ghi' : recordingsList.length > 0 ? `🎵 ${recordingsList.length} bản ghi` : '💬 Chat'}</span>
-          <h2>Hội thoại</h2>
-        </div>
-        {joined && !showBrowser && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            {recordingsList.map(r => (
-              <audio key={r.id} src={r.url} controls style={{ height: 28, borderRadius: 4, maxWidth: 120 }} />
+    </header>
+
+    {/* ── Error banner ── */}
+    {error && (
+      <div className="room-error-banner">
+        <p className="error" role="alert">{error}</p>
+      </div>
+    )}
+
+    {/* ── Main body: participants grid + chat drawer ── */}
+    <div className="room-body">
+      <div className="room-main">
+        {participants.length ? (
+          <div className="participants-grid">
+            {participants.map(person => (
+              <div className="participant-tile" key={person.participantId}>
+                <div className="tile-avatar">
+                  <span>{person.displayName[0]?.toUpperCase()}</span>
+                </div>
+                <div className="tile-name">{person.displayName}</div>
+                <div className="tile-role">{person.role}</div>
+                <div className="tile-status">
+                  {room?.raisedHands.includes(person.userId) && (
+                    <span className="tile-hand" title="Đang giơ tay">✋</span>
+                  )}
+                  <span className={`tile-mic ${person.micEnabled ? "on" : "off"}`} title={person.micEnabled ? "Mic đang bật" : "Mic đang tắt"}>
+                    {person.micEnabled ? "🎤" : "🔇"}
+                  </span>
+                </div>
+                {person.userId !== session.user.id && (
+                  <audio ref={el => { if (el) { remoteAudioRefs.current.set(person.userId, el); const s = remoteStreamsRef.current.get(person.userId); if (s && el.srcObject !== s) { el.srcObject = s; el.play().catch(() => {}); } } }} autoPlay playsInline style={{ width: 0, height: 0, position: 'absolute' }} />
+                )}
+              </div>
             ))}
-            <button 
-              className={recording.status === 'RECORDING' ? 'selected record-btn' : 'record-btn'} 
-              onClick={toggleRecording}
-              style={{ 
-                background: recording.status === 'RECORDING' ? '#dc2626' : '#6366f1',
-                color: '#fff', border: 'none', borderRadius: 8, 
-                padding: '6px 14px', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 6
-              }}
-            >
-              <span>{recording.status === 'RECORDING' ? '⏹' : '⏺'}</span>
-              {recording.status === 'RECORDING' ? 'Dừng' : 'Ghi âm'}
-            </button>
+          </div>
+        ) : (
+          <div className="participants-empty">
+            <Empty text={joined ? "Chưa có người tham gia" : "Nhập mã phòng để xem người tham gia"} />
           </div>
         )}
       </div>
-      {recording.status === 'ERROR' && recording.error && (
-        <p className="error" role="alert" style={{ margin: 8, fontSize: 13 }}>⚠️ {recording.error}</p>
-      )}
-      {joined ? (
-        <>
-          <div className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {messages.length === 0 && (
-              <div className="empty" style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>
-                <span>💬</span><p>Chưa có tin nhắn. Hãy bắt đầu cuộc hội thoại!</p>
-              </div>
-            )}
-            {messages.map(msg => (
-              <div key={msg.id} style={{ 
-                alignSelf: msg.userId === session.user.id ? 'flex-end' : 'flex-start',
-                background: msg.userId === session.user.id ? 'var(--accent)' : 'var(--surface2)',
-                color: msg.userId === session.user.id ? '#fff' : 'var(--text)',
-                borderRadius: '12px 12px 4px 12px', padding: '8px 14px',
-                maxWidth: '80%', fontSize: 14
-              }}>
-                {msg.userId !== session.user.id && (
-                  <small style={{ fontWeight: 600, display: 'block', marginBottom: 2, opacity: 0.8 }}>{msg.displayName}</small>
-                )}
-                <p style={{ margin: 0 }}>{msg.message}</p>
-                <small style={{ opacity: 0.6, fontSize: 10, display: 'block', marginTop: 2 }}>
-                  {new Date(msg.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
-                </small>
-              </div>
-            ))}
-            <div ref={el => el?.scrollIntoView({ behavior: 'smooth' })} />
+
+      {/* ── Chat drawer ── */}
+      <aside className={`chat-drawer${chatOpen ? " open" : ""}`}>
+        <div className="chat-drawer-header">
+          <div className="chat-drawer-title">
+            <span className="chat-eyebrow">
+              {recording.status === 'RECORDING' ? '🔴 Đang ghi' : recordingsList.length > 0 ? `🎵 ${recordingsList.length} bản ghi` : '💬 Chat'}
+            </span>
+            <h3>Hội thoại</h3>
           </div>
-          <form onSubmit={sendChat} style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid var(--border)' }}>
-            <input 
-              value={chatInput} 
-              onChange={e => setChatInput(e.target.value)}
-              placeholder="Nhập tin nhắn..." 
-              style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
-            />
-            <button type="submit" style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>
-              Gửi
-            </button>
-          </form>
-        </>
-      ) : (
-        <div className="empty" style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>
-          <span>💬</span><p>Tham gia phòng để chat và ghi âm</p>
+          <div className="chat-drawer-actions">
+            {recordingsList.map(r => (
+              <audio key={r.id} src={r.url} controls style={{ height: 26, borderRadius: 4, maxWidth: 100 }} />
+            ))}
+            {joined && !showBrowser && (
+              <button
+                className={recording.status === 'RECORDING' ? 'selected record-btn' : 'record-btn'}
+                onClick={toggleRecording}
+                style={{
+                  background: recording.status === 'RECORDING' ? '#dc2626' : '#6366f1',
+                  color: '#fff', border: 'none', borderRadius: 8,
+                  padding: '5px 12px', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 5, fontSize: 12
+                }}
+              >
+                <span>{recording.status === 'RECORDING' ? '⏹' : '⏺'}</span>
+                {recording.status === 'RECORDING' ? 'Dừng' : 'Ghi âm'}
+              </button>
+            )}
+          </div>
         </div>
-      )}
-    </section>
+
+        {recording.status === 'ERROR' && recording.error && (
+          <p className="error" role="alert" style={{ margin: '4px 12px', fontSize: 12 }}>⚠️ {recording.error}</p>
+        )}
+
+        {joined ? (
+          <>
+            <div className="chat-messages">
+              {messages.length === 0 ? (
+                <div className="chat-empty-state">
+                  <span>💬</span>
+                  <p>Chưa có tin nhắn. Hãy bắt đầu cuộc hội thoại!</p>
+                </div>
+              ) : (
+                messages.map(msg => {
+                  const isOwn = msg.userId === session.user.id;
+                  return (
+                    <div key={msg.id} className={`chat-msg${isOwn ? " own" : " other"}`}>
+                      {!isOwn && <small className="chat-msg-author">{msg.displayName}</small>}
+                      <p className="chat-msg-text">{msg.message}</p>
+                      <small className="chat-msg-time">
+                        {new Date(msg.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                      </small>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={el => el?.scrollIntoView({ behavior: 'smooth' })} />
+            </div>
+            <form onSubmit={sendChat} className="chat-form">
+              <input
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                placeholder="Nhập tin nhắn..."
+              />
+              <button type="submit">Gửi</button>
+            </form>
+          </>
+        ) : (
+          <div className="chat-empty-state">
+            <span>💬</span>
+            <p>Tham gia phòng để chat và ghi âm</p>
+          </div>
+        )}
+      </aside>
+    </div>
+
+    {/* ── Bottom control bar ── */}
+    {joined && (
+      <footer className="room-controlbar">
+        <button className={`ctrl-btn${mic ? " selected" : ""}`} onClick={toggleMic}>
+          <span className="ctrl-icon">{mic ? "🎤" : "🔇"}</span>
+          <span className="ctrl-label">{mic ? "Tắt mic" : "Bật mic"}</span>
+        </button>
+        <button className={`ctrl-btn${hand ? " selected" : ""}`} onClick={toggleHand}>
+          <span className="ctrl-icon">✋</span>
+          <span className="ctrl-label">{hand ? "Hạ tay" : "Giơ tay"}</span>
+        </button>
+        <button className="ctrl-btn" onClick={ping}>
+          <span className="ctrl-icon">📡</span>
+          <span className="ctrl-label">Ping</span>
+        </button>
+        <button className={`ctrl-btn${recording.status === 'RECORDING' ? " recording" : ""}`} onClick={toggleRecording}>
+          <span className="ctrl-icon">{recording.status === 'RECORDING' ? '⏹' : '⏺'}</span>
+          <span className="ctrl-label">{recording.status === 'RECORDING' ? 'Dừng' : 'Ghi âm'}</span>
+        </button>
+        <button className={`ctrl-btn chat-toggle${chatOpen ? " active" : ""}`} onClick={() => setChatOpen(v => !v)}>
+          <span className="ctrl-icon">💬</span>
+          <span className="ctrl-label">Chat</span>
+        </button>
+      </footer>
+    )}
   </div>;
 }
 
