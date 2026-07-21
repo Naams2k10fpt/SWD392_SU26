@@ -1,6 +1,9 @@
 import http from "node:http";
+import path from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
 import cors from "cors";
 import express from "express";
+import multer from "multer";
 import mysql from "mysql2/promise";
 import { Server } from "socket.io";
 
@@ -9,6 +12,10 @@ const databaseUrl = process.env.LUCY_DB_URL || "mysql://@localhost:3306/test_luc
 const pool = mysql.createPool(databaseUrl);
 const app = express();
 const server = http.createServer(app);
+
+const RECORDINGS_DIR = path.resolve("recordings");
+if (!existsSync(RECORDINGS_DIR)) mkdirSync(RECORDINGS_DIR, { recursive: true });
+const upload = multer({ dest: RECORDINGS_DIR, limits: { fileSize: 50 * 1024 * 1024 } });
 const io = new Server(server, {
   cors: {
     origin: process.env.CORS_ORIGIN || "*",
@@ -222,6 +229,46 @@ app.get("/rooms/:roomCode/recordings", async (request, response, next) => {
   }
 });
 
+app.post("/api/upload-recording", upload.single("audio"), async (request, response, next) => {
+  try {
+    const { recordingId } = request.body;
+    const file = request.file;
+    if (!recordingId || !file) {
+      response.status(400).json({ message: "recordingId and audio file are required" });
+      return;
+    }
+    const storageUri = `/recordings/${file.filename}`;
+    await pool.execute(
+      "UPDATE recording_logs SET storage_uri = ?, status = 'SAVED', stopped_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'RECORDING'",
+      [storageUri, recordingId]
+    );
+    const [rows] = await pool.execute(
+      "SELECT room_id, started_by, started_by_display_name FROM recording_logs WHERE id = ?", [recordingId]
+    );
+    if (rows.length > 0) {
+      const [room] = await pool.execute(
+        "SELECT id, room_code, title FROM realtime_rooms WHERE id = ?", [rows[0].room_id]
+      );
+      if (room.length > 0) {
+        io.to(room[0].room_code).emit("recording:update", {
+          status: "SAVED",
+          recordingId,
+          audioUrl: storageUri,
+        });
+        await pool.execute(
+          "INSERT INTO podcast_recordings (creator_external_id, room_code, title, storage_uri, duration_seconds) VALUES (?, ?, ?, ?, 0)",
+          [rows[0].started_by, room[0].room_code, `Recording - ${room[0].title}`, storageUri]
+        );
+      }
+    }
+    response.json({ ok: true, storageUri });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.use("/recordings", express.static(RECORDINGS_DIR));
+
 io.on("connection", (socket) => {
   socket.data.joinedRooms = new Set();
 
@@ -241,9 +288,11 @@ io.on("connection", (socket) => {
         "SELECT id FROM realtime_room_participants WHERE room_id = ? AND anonymous_uid = ? AND left_at IS NULL ORDER BY joined_at DESC LIMIT 1",
         [room.id, userId]
       );
-      socketParticipants.set(socket.id, { roomCode: roomId, participantId: participants[0].id });
+      socketParticipants.set(socket.id, { roomCode: roomId, participantId: participants[0].id, userId });
       socket.data.joinedRooms.add(roomId);
       socket.join(roomId);
+
+      socket.to(roomId).emit("webrtc:user-joined", { userId, displayName });
 
       const state = await serializeRoom(roomId);
       io.to(roomId).emit("room:state", state);
@@ -372,15 +421,46 @@ io.on("connection", (socket) => {
         acknowledge?.({ ok: false, message: "Join the room first" });
         return;
       }
-      const room = await ensureRoom(roomId);
       await pool.execute(
-        "UPDATE recording_logs SET status = 'SAVED', stopped_at = CURRENT_TIMESTAMP WHERE room_id = ? AND status = 'RECORDING'",
-        [room.id]
+        "UPDATE recording_logs SET stopped_at = CURRENT_TIMESTAMP WHERE room_id = ? AND status = 'RECORDING'",
+        [roomId]
       );
-      io.to(roomId).emit("recording:update", { status: "SAVED" });
       acknowledge?.({ ok: true });
     } catch (error) {
       acknowledge?.({ ok: false, message: error.message });
+    }
+  });
+
+  socket.on("webrtc:offer", ({ targetUserId, sdp }) => {
+    const sender = socketParticipants.get(socket.id);
+    if (!sender) return;
+    for (const [sid, p] of socketParticipants) {
+      if (p.userId === targetUserId && p.roomCode === sender.roomCode) {
+        io.to(sid).emit("webrtc:offer", { userId: sender.userId, sdp });
+        break;
+      }
+    }
+  });
+
+  socket.on("webrtc:answer", ({ targetUserId, sdp }) => {
+    const sender = socketParticipants.get(socket.id);
+    if (!sender) return;
+    for (const [sid, p] of socketParticipants) {
+      if (p.userId === targetUserId && p.roomCode === sender.roomCode) {
+        io.to(sid).emit("webrtc:answer", { userId: sender.userId, sdp });
+        break;
+      }
+    }
+  });
+
+  socket.on("webrtc:ice-candidate", ({ targetUserId, candidate }) => {
+    const sender = socketParticipants.get(socket.id);
+    if (!sender) return;
+    for (const [sid, p] of socketParticipants) {
+      if (p.userId === targetUserId && p.roomCode === sender.roomCode) {
+        io.to(sid).emit("webrtc:ice-candidate", { userId: sender.userId, candidate });
+        break;
+      }
     }
   });
 
@@ -388,6 +468,7 @@ io.on("connection", (socket) => {
     const participant = socketParticipants.get(socket.id);
     if (!participant) return;
     socketParticipants.delete(socket.id);
+    io.to(participant.roomCode).emit("webrtc:user-left", { userId: participant.userId });
     await pool.execute("UPDATE realtime_room_participants SET left_at = CURRENT_TIMESTAMP WHERE id = ?", [participant.participantId]);
     const state = await serializeRoom(participant.roomCode);
     io.to(participant.roomCode).emit("room:state", state);
