@@ -733,8 +733,8 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingsListRef = useRef<{ id: number; url: string; status: string }[]>([]);
+  const recIdCounterRef = useRef(0);
   const [recordingsList, setRecordingsList] = useState<{ id: number; url: string; status: string }[]>([]);
-  let recIdCounter = 0;
 
   function toggleRecording() {
     if (recording.status === 'RECORDING') {
@@ -746,7 +746,7 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
       audioChunksRef.current = [];
       const recorder = new MediaRecorder(stream, { mimeType: mime });
-      const thisId = ++recIdCounter;
+      const thisId = ++recIdCounterRef.current;
       recorder.ondataavailable = e => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
