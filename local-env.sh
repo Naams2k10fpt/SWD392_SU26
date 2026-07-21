@@ -1,0 +1,6 @@
+export LUCY_DB="Server=localhost;Database=test_lucy_phase5;User=root;Password=;AllowUserVariables=True;"
+export LUCY_JWT_SECRET="lucy_swd392_jwt_secret_key_2026_32chars"
+export LUCY_DB_URL="mysql://root@localhost:3306/test_lucy_phase5"
+export LUCY_JDBC_URL="jdbc:mysql://localhost:3306/test_lucy_phase5"
+export LUCY_DB_USER="root"
+export LUCY_DB_PASSWORD=""
