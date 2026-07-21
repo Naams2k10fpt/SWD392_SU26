@@ -37,40 +37,29 @@ export LUCY_DB_PASSWORD=""
 
 ### 3. Chạy Backend Services (mỗi service 1 terminal riêng)
 
-Trước khi chạy mỗi service, load biến môi trường:
-```bash
-source /home/amtia/Projects/swd/SUM/SWD392_SU26/local-env.sh
-```
+Tất cả đều chạy từ **root project** (`/home/amtia/Projects/swd/SUM/SWD392_SU26`), **không cần cd**:
 
 **Terminal 1 — Auth API (.NET)**
 ```bash
-source /home/amtia/Projects/swd/SUM/SWD392_SU26/local-env.sh
-cd /home/amtia/Projects/swd/SUM/SWD392_SU26/phase5-rbl/dotnet-auth
-dotnet run
+source /home/amtia/Projects/swd/SUM/SWD392_SU26/local-env.sh && dotnet run --project /home/amtia/Projects/swd/SUM/SWD392_SU26/phase5-rbl/dotnet-auth
 # → http://localhost:5000
 ```
 
 **Terminal 2 — Wallet API (.NET)**
 ```bash
-source /home/amtia/Projects/swd/SUM/SWD392_SU26/local-env.sh
-cd /home/amtia/Projects/swd/SUM/SWD392_SU26/phase5-rbl/dotnet-wallet
-dotnet run
+source /home/amtia/Projects/swd/SUM/SWD392_SU26/local-env.sh && dotnet run --project /home/amtia/Projects/swd/SUM/SWD392_SU26/phase5-rbl/dotnet-wallet
 # → http://localhost:5040
 ```
 
 **Terminal 3 — Realtime Audio (Node.js)**
 ```bash
-cd /home/amtia/Projects/swd/SUM/SWD392_SU26/phase5-rbl/realtime-audio
-npm install   # lần đầu
-npm start
+cd /home/amtia/Projects/swd/SUM/SWD392_SU26/phase5-rbl/realtime-audio && npm start
 # → http://localhost:3020
 ```
 
 ### 4. Chạy Web App
 ```bash
-cd /home/amtia/Projects/swd/SUM/SWD392_SU26/web_app
-npm install   # lần đầu
-npm run dev
+cd /home/amtia/Projects/swd/SUM/SWD392_SU26/web_app && npm run dev
 # → http://localhost:3000
 ```
 
