@@ -24,60 +24,57 @@ database/dbeaver-import-all.sql
 Database mặc định: `lucy_phase5` (port 3306)
 
 ### 2. Cấu hình môi trường
-Tạo file `local-env.sh` ở thư mục gốc:
+File `local-env.sh` ở thư mục gốc (`/home/amtia/Projects/swd/SUM/SWD392_SU26/local-env.sh`) đã có sẵn:
 ```bash
-export LUCY_DB="Server=localhost;Database=lucy_phase5;User=root;Password=;AllowUserVariables=True;"
+export LUCY_DB="Server=localhost;Database=test_lucy_phase5;User=root;Password=;AllowUserVariables=True;"
 export LUCY_JWT_SECRET="lucy_swd392_jwt_secret_key_2026_32chars"
-export LUCY_DB_URL="mysql://root@localhost:3306/lucy_phase5"
-export LUCY_JDBC_URL="jdbc:mysql://localhost:3306/lucy_phase5"
+export LUCY_DB_URL="mysql://root@localhost:3306/test_lucy_phase5"
+export LUCY_JDBC_URL="jdbc:mysql://localhost:3306/test_lucy_phase5"
 export LUCY_DB_USER="root"
 export LUCY_DB_PASSWORD=""
 ```
-(Nếu dùng database `test_lucy_phase5` thì sửa tên cho phù hợp)
 
 ### 3. Chạy Backend Services (mỗi service 1 terminal riêng)
 
-Tất cả đều chạy từ **root project** (`/home/amtia/Projects/swd/SUM/SWD392_SU26`), **không cần cd**:
+**Lưu ý:** Tất cả đều chạy từ thư mục gốc, **không cần `cd`** sang thư mục service.
+Cứ copy nguyên dòng lệnh bên dưới dán vào terminal là chạy.
 
 **Terminal 1 — Auth API (.NET)**
 ```bash
 source /home/amtia/Projects/swd/SUM/SWD392_SU26/local-env.sh && dotnet run --project /home/amtia/Projects/swd/SUM/SWD392_SU26/phase5-rbl/dotnet-auth
-# → http://localhost:5000
 ```
+→ http://localhost:5000
 
 **Terminal 2 — Wallet API (.NET)**
 ```bash
 source /home/amtia/Projects/swd/SUM/SWD392_SU26/local-env.sh && dotnet run --project /home/amtia/Projects/swd/SUM/SWD392_SU26/phase5-rbl/dotnet-wallet
-# → http://localhost:5040
 ```
+→ http://localhost:5040
 
 **Terminal 3 — Realtime Audio (Node.js)**
 ```bash
 cd /home/amtia/Projects/swd/SUM/SWD392_SU26/phase5-rbl/realtime-audio && npm start
-# → http://localhost:3020
 ```
+→ http://localhost:3020
 
 ### 4. Chạy Web App
 ```bash
 cd /home/amtia/Projects/swd/SUM/SWD392_SU26/web_app && npm run dev
-# → http://localhost:3000
 ```
+→ http://localhost:3000
 
-### 5. Test Audio Flow
+### 5. Test
 
-| Bước | Thao tác | Kết quả |
-|---|---|---|
-| 1 | Mở http://localhost:3000 → Register → Login | Vào trang Home |
-| 2 | Click **Phòng học** → gõ `english-level-1` → **Vào phòng** | Kết nối Socket.IO + xin quyền mic |
-| 3 | Click **🔇 Bật mic / 🎤 Tắt mic** | Bật/tắt mic thật qua WebRTC |
-| 4 | Click **⏺ Ghi âm** → nói → **⏹ Dừng** | Recording lưu local + upload server + auto vào Podcast |
-| 5 | Mở tab 2 cùng phòng `english-level-1` với user khác | WebRTC tự kết nối, nghe được nhau |
-| 6 | Vào **Podcast** | Xem bản ghi đã auto tạo |
+| Chức năng | Cách test |
+|---|---|
+| Register / Login | Mở http://localhost:3000 → Register → Login |
+| Vào phòng | Phòng học → gõ `english-level-1` → Vào phòng |
+| Mic | Bật/tắt mic → WebRTC kết nối giữa 2 tab |
+| Ghi âm | ⏺ Ghi âm → nói → ⏹ Dừng → auto lưu + vào Podcast |
+| Tạo phòng | ＋ Tạo phòng → chọn ngôn ngữ, level → tự vào phòng |
+| Podcast | Tab Podcast → xem bản ghi đã auto tạo |
 
-### 6. Tạo phòng học
-Click **＋ Tạo phòng** trong tab Phòng học → chọn ngôn ngữ, level → **tạo xong tự nhảy vào phòng**.
-
-### 7. Chạy stress test (k6)
+### 6. Stress test (k6)
 ```bash
 k6 run /home/amtia/Projects/swd/SUM/SWD392_SU26/phase5-rbl/stress-tests/realtime-auth-wallet-stress.js
 ```
