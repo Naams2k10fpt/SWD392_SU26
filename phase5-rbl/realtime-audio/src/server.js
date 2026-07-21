@@ -11,10 +11,6 @@ const port = Number(process.env.PORT || 3020);
 const databaseUrl = process.env.LUCY_DB_URL || "mysql://@localhost:3306/test_lucy_phase5";
 const pool = mysql.createPool(databaseUrl);
 
-// Cleanup stale participants from previous server instance
-pool.execute("UPDATE realtime_room_participants SET left_at = NOW() WHERE left_at IS NULL").catch(() => {});
-pool.execute("UPDATE realtime_rooms SET status = 'EMPTY' WHERE status = 'OPEN' AND id NOT IN (SELECT DISTINCT room_id FROM realtime_room_participants WHERE left_at IS NULL)").catch(() => {});
-
 const app = express();
 const server = http.createServer(app);
 
@@ -493,8 +489,15 @@ io.on("connection", (socket) => {
 });
 
 if (!process.env.LUCY_TEST) {
-  server.listen(port, () => {
-    console.log(`RBL Phase 2 real-time audio MVP listening on ${port}`);
+  server.listen(port, async () => {
+    try {
+      await pool.execute("UPDATE realtime_room_participants SET left_at = NOW() WHERE left_at IS NULL");
+      await pool.execute("UPDATE realtime_rooms SET status = 'EMPTY' WHERE status = 'OPEN'");
+      console.log(`RBL Phase 2 real-time audio MVP listening on ${port}`);
+    } catch (err) {
+      console.error("Startup cleanup failed:", err);
+      process.exit(1);
+    }
   });
 }
 
