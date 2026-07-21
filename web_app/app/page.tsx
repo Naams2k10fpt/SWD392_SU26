@@ -611,6 +611,7 @@ function RoomView({ session }: { session: Session }) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [joined, setJoined] = useState(false);
+  const [joining, setJoining] = useState(false);
   const [roomId, setRoomId] = useState("");
   const [room, setRoom] = useState<Room | null>(null);
   const [mic, setMic] = useState(true);
@@ -635,31 +636,15 @@ function RoomView({ session }: { session: Session }) {
     const connect = () => {
       if (!active || !window.io) return;
       liveSocket = window.io(REALTIME_URL, { transports: ["websocket"] });
+      socketRef.current = liveSocket;
+      setSocket(liveSocket);
       liveSocket.on("connect", async () => {
         setConnected(true);
         setError("");
         const pendingRoom = pendingAutoJoinRef.current;
         if (pendingRoom) {
           pendingAutoJoinRef.current = null;
-          setRoomId(pendingRoom);
-          setShowBrowser(false);
-          const ls = liveSocket!;
-          ls.emit("room:join", { roomId: pendingRoom, userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
-            if (result?.ok) {
-              setJoined(true);
-              setError("");
-              const stream = await startLocalStream();
-              if (stream && result.room?.users) {
-                const others = result.room.users.filter((u: { userId: string }) => u.userId !== session.user.id);
-                for (const user of others) {
-                  const pc = await createPeerConnection(user.userId);
-                  const offer = await pc.createOffer();
-                  await pc.setLocalDescription(offer);
-                   ls.emit("webrtc:offer", { targetUserId: user.userId, sdp: offer });
-                }
-              }
-            }
-          });
+          doAutoJoin(pendingRoom);
         }
       });
       liveSocket.on("disconnect", () => {
@@ -924,20 +909,31 @@ function RoomView({ session }: { session: Session }) {
 
   const participants = useMemo(() => room?.users || [], [room]);
 
-  if (showBrowser) {
-    return <RoomBrowser session={session} onJoin={(code) => {
-      const s = socketRef.current;
-      if (s?.connected) {
-        setRoomId(code);
-        setShowBrowser(false);
-        s.emit("room:join", { roomId: code, userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
-          if (result?.ok) { setJoined(true); setError(""); const stream = await startLocalStream(); if (stream && result.room?.users) { const others = result.room.users.filter((u: { userId: string }) => u.userId !== session.user.id); for (const user of others) { const pc = await createPeerConnection(user.userId); const offer = await pc.createOffer(); await pc.setLocalDescription(offer); s.emit("webrtc:offer", { targetUserId: user.userId, sdp: offer }); } } }
-        });
-      } else {
-        pendingAutoJoinRef.current = code;
-        setShowBrowser(false);
+  async function doAutoJoin(code: string) {
+    setRoomId(code);
+    setJoining(true);
+    setShowBrowser(false);
+    const s = socketRef.current;
+    if (!s?.connected) { pendingAutoJoinRef.current = code; return; }
+    s.emit("room:join", { roomId: code, userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
+      if (!result?.ok) { setJoining(false); return; }
+      setJoining(false);
+      setJoined(true);
+      setError("");
+      const stream = await startLocalStream();
+      if (!stream || !result.room?.users) return;
+      const others = result.room.users.filter((u: { userId: string }) => u.userId !== session.user.id);
+      for (const user of others) {
+        const pc = await createPeerConnection(user.userId);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        s.emit("webrtc:offer", { targetUserId: user.userId, sdp: offer });
       }
-    }} />;
+    });
+  }
+
+  if (showBrowser) {
+    return <RoomBrowser session={session} onJoin={doAutoJoin} />;
   }
 
   return <div className="room-layout">
@@ -945,7 +941,12 @@ function RoomView({ session }: { session: Session }) {
       <div className="connection"><i className={connected ? "connected" : ""} />{connected ? "Đã kết nối" : "Đang kết nối"}{latency !== null && <span>{latency} ms</span>}</div>
       <span className="eyebrow">🎙️ Phòng học trực tiếp</span>
       <h2>{joined ? `📌 ${room?.title || roomId}` : "Tham gia phòng học"}</h2>
-      {!joined ? (
+      {joining ? (
+        <div style={{ textAlign: 'center', padding: '24px 0' }}>
+          <span className="spinner" />
+          <p style={{ marginTop: 8, color: 'var(--muted)' }}>Đang tham gia phòng {roomId}…</p>
+        </div>
+      ) : !joined ? (
         <>
           <form className="form compact" onSubmit={join}>
             <label>Room ID<input value={roomId} onChange={event => setRoomId(event.target.value)} placeholder="english-level-1" required disabled={!connected} /></label>
