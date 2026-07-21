@@ -732,36 +732,57 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
   }
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const recordingsListRef = useRef<{ id: number; url: string; status: string }[]>([]);
+  const [recordingsList, setRecordingsList] = useState<{ id: number; url: string; status: string }[]>([]);
+  let recIdCounter = 0;
+
   function toggleRecording() {
     if (recording.status === 'RECORDING') {
       mediaRecorderRef.current?.stop();
       mediaRecorderRef.current = null;
     } else {
-      if (recording.audioUrl) URL.revokeObjectURL(recording.audioUrl);
+      const stream = localStreamRef.current;
+      if (!stream) { setRecording({ status: 'ERROR', error: "Chưa có quyền truy cập micro. Join room trước." }); return; }
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
-      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-        const recorder = new MediaRecorder(stream, { mimeType: mime });
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      const thisId = ++recIdCounter;
+      recorder.ondataavailable = e => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
+        const localUrl = URL.createObjectURL(blob);
+        const entry = { id: thisId, url: localUrl, status: 'local' };
+        recordingsListRef.current = [...recordingsListRef.current, entry];
+        setRecordingsList([...recordingsListRef.current]);
+        setRecording({ status: 'NONE' });
         audioChunksRef.current = [];
-        recorder.ondataavailable = e => {
-          if (e.data.size > 0) audioChunksRef.current.push(e.data);
-        };
-        recorder.onstop = () => {
-          stream.getTracks().forEach(t => t.stop());
-          const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
-          const url = URL.createObjectURL(blob);
-          setRecording({ status: 'SAVED', audioUrl: url });
-          audioChunksRef.current = [];
-        };
-        recorder.onerror = () => {
-          stream.getTracks().forEach(t => t.stop());
-          setRecording({ status: 'ERROR', error: "Lỗi khi ghi âm" });
-        };
-        mediaRecorderRef.current = recorder;
-        recorder.start();
-        setRecording({ status: 'RECORDING' });
-      }).catch(err => {
-        setRecording({ status: 'ERROR', error: "Không thể truy cập micro: " + err.message });
-      });
+        const s = socketRef.current || socket;
+        if (s?.connected) {
+          const formData = new FormData();
+          formData.append("audio", blob, `rec-${thisId}.webm`);
+          formData.append("roomCode", roomId);
+          formData.append("userId", session.user.id);
+          formData.append("displayName", session.user.displayName);
+          fetch(`${REALTIME_URL}/api/upload-recording`, {
+            method: "POST",
+            body: formData,
+          }).then(res => res.json()).then(data => {
+            if (data.ok) {
+              entry.url = data.storageUri;
+              entry.status = 'saved';
+              setRecordingsList([...recordingsListRef.current]);
+            }
+          }).catch(() => {});
+        }
+      };
+      recorder.onerror = () => {
+        setRecording({ status: 'ERROR', error: "Lỗi khi ghi âm" });
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecording({ status: 'RECORDING' });
     }
   }
 
@@ -936,14 +957,14 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
     <section className="panel chat-panel">
       <div className="panel-title">
         <div>
-          <span className="eyebrow">{recording.status === 'RECORDING' ? '🔴 Đang ghi' : recording.audioUrl ? '🎵 Đã ghi' : '💬 Chat'}</span>
+          <span className="eyebrow">{recording.status === 'RECORDING' ? '🔴 Đang ghi' : recordingsList.length > 0 ? `🎵 ${recordingsList.length} bản ghi` : '💬 Chat'}</span>
           <h2>Hội thoại</h2>
         </div>
         {joined && !showBrowser && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {recording.audioUrl && recording.status === 'SAVED' && (
-              <audio src={recording.audioUrl} controls style={{ height: 36, borderRadius: 6 }} />
-            )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {recordingsList.map(r => (
+              <audio key={r.id} src={r.url} controls style={{ height: 28, borderRadius: 4, maxWidth: 120 }} />
+            ))}
             <button 
               className={recording.status === 'RECORDING' ? 'selected record-btn' : 'record-btn'} 
               onClick={toggleRecording}

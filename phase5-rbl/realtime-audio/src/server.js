@@ -137,17 +137,17 @@ app.post("/agora/token", async (request, response, next) => {
 
 app.get("/rooms", async (request, response, next) => {
   try {
-    let sql = "SELECT room_code FROM realtime_rooms WHERE status = 'OPEN'";
+    let sql = `SELECT r.room_code FROM realtime_rooms r WHERE r.status = 'OPEN' AND EXISTS (SELECT 1 FROM realtime_room_participants rp WHERE rp.room_id = r.id AND rp.left_at IS NULL)`;
     const params = [];
     if (request.query.language) {
-      sql += " AND language_code = ?";
+      sql += " AND r.language_code = ?";
       params.push(request.query.language);
     }
     if (request.query.level) {
-      sql += " AND level_number = ?";
+      sql += " AND r.level_number = ?";
       params.push(Number(request.query.level));
     }
-    sql += " ORDER BY created_at";
+    sql += " ORDER BY r.created_at";
     const [rooms] = await pool.execute(sql, params);
     response.json({ rooms: await Promise.all(rooms.map(room => serializeRoom(room.room_code))) });
   } catch (error) {
@@ -243,36 +243,19 @@ app.get("/rooms/:roomCode/recordings", async (request, response, next) => {
 
 app.post("/api/upload-recording", upload.single("audio"), async (request, response, next) => {
   try {
-    const { recordingId } = request.body;
+    const { roomCode, userId, displayName } = request.body;
     const file = request.file;
-    if (!recordingId || !file) {
-      response.status(400).json({ message: "recordingId and audio file are required" });
+    if (!roomCode || !file) {
+      response.status(400).json({ message: "roomCode and audio file are required" });
       return;
     }
     const storageUri = `/recordings/${file.filename}`;
+    const room = await ensureRoom(roomCode);
     await pool.execute(
-      "UPDATE recording_logs SET storage_uri = ?, status = 'SAVED', stopped_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'RECORDING'",
-      [storageUri, recordingId]
+      "INSERT INTO podcast_recordings (creator_external_id, room_code, title, storage_uri, duration_seconds) VALUES (?, ?, ?, ?, 0)",
+      [userId || "anonymous", roomCode, `Recording - ${room.title || roomCode}`, storageUri]
     );
-    const [rows] = await pool.execute(
-      "SELECT room_id, started_by, started_by_display_name FROM recording_logs WHERE id = ?", [recordingId]
-    );
-    if (rows.length > 0) {
-      const [room] = await pool.execute(
-        "SELECT id, room_code, title FROM realtime_rooms WHERE id = ?", [rows[0].room_id]
-      );
-      if (room.length > 0) {
-        io.to(room[0].room_code).emit("recording:update", {
-          status: "SAVED",
-          recordingId,
-          audioUrl: storageUri,
-        });
-        await pool.execute(
-          "INSERT INTO podcast_recordings (creator_external_id, room_code, title, storage_uri, duration_seconds) VALUES (?, ?, ?, ?, 0)",
-          [rows[0].started_by, room[0].room_code, `Recording - ${room[0].title}`, storageUri]
-        );
-      }
-    }
+    io.to(roomCode).emit("recording:update", { status: "SAVED", audioUrl: storageUri });
     response.json({ ok: true, storageUri });
   } catch (error) {
     next(error);
