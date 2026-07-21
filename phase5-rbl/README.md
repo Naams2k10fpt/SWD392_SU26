@@ -16,11 +16,67 @@ Folder này kế thừa Phase 1 + Phase 2 + Phase 3 + Phase 4 và bổ sung Phas
 
 ## Chạy Phase 5
 
+### 1. Import Database
+Mở DBeaver / MariaDB client, chạy file:
+```
+database/dbeaver-import-all.sql
+```
+Database mặc định: `lucy_phase5` (port 3306)
+
+### 2. Cấu hình môi trường
+```bash
+# Copy từ file mẫu (Linux/Mac)
+cp ../local-env.example.ps1 ../local-env.ps1
+# Sửa password trong file cho đúng
+```
+
+### 3. Chạy Backend Services (mỗi service 1 terminal riêng)
+
+**Terminal 1 — Auth API (.NET)**
+```bash
+source ../local-env.sh 2>/dev/null || export LUCY_DB_URL="mysql://root@localhost:3306/lucy_phase5"
+dotnet run --project ../dotnet-auth
+# → http://localhost:5000
+```
+
+**Terminal 2 — Wallet API (.NET)**
+```bash
+source ../local-env.sh 2>/dev/null
+dotnet run --project ../dotnet-wallet
+# → http://localhost:5040
+```
+
+**Terminal 3 — Realtime Audio (Node.js)**
+```bash
+cd realtime-audio
+npm install
+npm start
+# → http://localhost:3020
+```
+
+### 4. Chạy Web App
+```bash
+cd ../web_app
+npm install
+npm run dev
+# → http://localhost:3000
+```
+
+### 5. Test Audio Flow
+
+| Bước | Thao tác | Kết quả |
+|---|---|---|
+| 1 | Mở http://localhost:3000 → Register → Login | Vào trang Home |
+| 2 | Click **Phòng học** → nhập `english-level-1` → **Join Room** | Kết nối Socket.IO + xin quyền mic |
+| 3 | Click **🔇 Bật mic / 🎤 Tắt mic** | Bật/tắt mic thật qua WebRTC |
+| 4 | Click **⏺ Ghi âm** → nói → **⏹ Dừng** | Recording upload lên server, hiện audio player |
+| 5 | Mở tab 2 cùng phòng `english-level-1` với user khác | WebRTC tự kết nối, nghe được nhau |
+| 6 | Vào **Podcast** | Xem bản ghi đã auto tạo podcast |
+
+### 6. Chạy stress test (k6)
 ```bash
 k6 run stress-tests/realtime-auth-wallet-stress.js
 ```
-
-Nếu chưa cài k6, dùng file script này như kịch bản review endpoint và tải đồng thời cho defense.
 
 ## Nội dung kế thừa từ Phase 1
 
