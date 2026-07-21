@@ -49,7 +49,13 @@ async function ensureRoom(roomCode) {
     "SELECT id, room_code, title, language_code, level_number, agora_channel_name, status, created_at FROM realtime_rooms WHERE room_code = ?",
     [roomCode]
   );
-  if (existing.length > 0) return existing[0];
+  if (existing.length > 0) {
+    if (existing[0].status !== 'OPEN') {
+      await pool.execute("UPDATE realtime_rooms SET status = 'OPEN' WHERE room_code = ?", [roomCode]);
+      existing[0].status = 'OPEN';
+    }
+    return existing[0];
+  }
 
   const parsed = parseRoomCode(roomCode);
   const languageCode = parsed?.languageCode || "en";
@@ -474,13 +480,27 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", async () => {
-    const participant = socketParticipants.get(socket.id);
-    if (!participant) return;
-    socketParticipants.delete(socket.id);
-    io.to(participant.roomCode).emit("webrtc:user-left", { userId: participant.userId });
-    await pool.execute("UPDATE realtime_room_participants SET left_at = CURRENT_TIMESTAMP WHERE id = ?", [participant.participantId]);
-    const state = await serializeRoom(participant.roomCode);
-    io.to(participant.roomCode).emit("room:state", state);
+    try {
+      const participant = socketParticipants.get(socket.id);
+      if (!participant) return;
+      socketParticipants.delete(socket.id);
+      io.to(participant.roomCode).emit("webrtc:user-left", { userId: participant.userId });
+      await pool.execute(
+        "UPDATE realtime_room_participants SET left_at = CURRENT_TIMESTAMP WHERE anonymous_uid = ? AND room_id = (SELECT id FROM realtime_rooms WHERE room_code = ?) AND left_at IS NULL",
+        [participant.userId, participant.roomCode]
+      );
+      const [active] = await pool.execute(
+        "SELECT COUNT(*) as cnt FROM realtime_room_participants rp JOIN realtime_rooms rr ON rr.id = rp.room_id WHERE rr.room_code = ? AND rp.left_at IS NULL",
+        [participant.roomCode]
+      );
+      if (active[0].cnt === 0) {
+        await pool.execute("UPDATE realtime_rooms SET status = 'EMPTY' WHERE room_code = ?", [participant.roomCode]);
+      }
+      const state = await serializeRoom(participant.roomCode);
+      io.to(participant.roomCode).emit("room:state", state);
+    } catch (error) {
+      console.error("Disconnect error:", error);
+    }
   });
 });
 

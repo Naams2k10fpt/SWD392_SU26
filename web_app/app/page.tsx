@@ -732,69 +732,36 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
   }
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const recordingIdRef = useRef<string | null>(null);
-
   function toggleRecording() {
-    const s = socketRef.current || socket;
     if (recording.status === 'RECORDING') {
       mediaRecorderRef.current?.stop();
       mediaRecorderRef.current = null;
-      s?.emit("recording:stop", { roomId });
     } else {
+      const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
       navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-        const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4" });
+        const recorder = new MediaRecorder(stream, { mimeType: mime });
         audioChunksRef.current = [];
-        recordingIdRef.current = null;
         recorder.ondataavailable = e => {
           if (e.data.size > 0) audioChunksRef.current.push(e.data);
         };
         recorder.onstop = () => {
           stream.getTracks().forEach(t => t.stop());
           const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
-          const rid = recordingIdRef.current;
-          if (rid) {
-            const formData = new FormData();
-            formData.append("audio", blob, `recording-${rid}.webm`);
-            formData.append("recordingId", rid);
-            fetch(`${REALTIME_URL}/api/upload-recording`, {
-              method: "POST",
-              body: formData,
-            }).then(res => res.json()).then(data => {
-              if (data.ok) {
-                setRecording(prev => ({ ...prev, status: 'SAVED', audioUrl: data.storageUri }));
-              } else {
-                fallbackLocalUrl(blob);
-              }
-            }).catch(() => fallbackLocalUrl(blob));
-          } else {
-            fallbackLocalUrl(blob);
-          }
+          const url = URL.createObjectURL(blob);
+          setRecording({ status: 'SAVED', audioUrl: url });
           audioChunksRef.current = [];
         };
         recorder.onerror = () => {
           stream.getTracks().forEach(t => t.stop());
-          setRecording(prev => ({ ...prev, status: 'ERROR', error: "Lỗi khi ghi âm" }));
+          setRecording({ status: 'ERROR', error: "Lỗi khi ghi âm" });
         };
         mediaRecorderRef.current = recorder;
         recorder.start();
         setRecording({ status: 'RECORDING' });
-        s?.emit("recording:start", {
-          roomId, userId: session.user.id, displayName: session.user.displayName,
-        }, (result: { ok: boolean; recordingId?: string }) => {
-          if (result?.ok && result.recordingId) {
-            recordingIdRef.current = result.recordingId;
-            setRecording(prev => ({ ...prev, recordingId: result.recordingId }));
-          }
-        });
       }).catch(err => {
         setRecording({ status: 'ERROR', error: "Không thể truy cập micro: " + err.message });
       });
     }
-  }
-
-  function fallbackLocalUrl(blob: Blob) {
-    const url = URL.createObjectURL(blob);
-    setRecording(prev => ({ ...prev, status: 'SAVED', audioUrl: url }));
   }
 
   async function startLocalStream() {
