@@ -205,6 +205,7 @@ export default function LucyPage() {
     setSession(next);
   };
   const [showCreateRoom, setShowCreateRoom] = useState(false);
+  const [pendingRoomCode, setPendingRoomCode] = useState("");
 
   if (booting) return <div className="boot"><span className="spinner" />Đang mở LUCY…</div>;
 
@@ -453,7 +454,7 @@ function PodcastsView({ session, notify }: { session: Session; notify: (message:
   return <><div className="section-heading"><div><span className="eyebrow">📻 Thư viện</span><h2>Podcast bài học</h2><p>Nghe lại nội dung từ các phòng học LUCY.</p></div>{isSuper && <button className="primary-button fit" onClick={() => { setError(""); setDialog(true); }}>＋ Tạo mới</button>}</div>{error && !dialog && <p className="error banner" role="alert">{error} <button onClick={load}>Thử lại</button></p>}{loading ? <Empty text="Đang tải podcast…" loading /> : items.length ? <section className="podcast-grid">{items.map(item => <article className="podcast-card" key={item.id}><div className="podcast-art"><span>▶</span><small>{duration(item.durationSeconds)}</small></div><div><span className="eyebrow">{item.roomId}</span><h3>{item.title}</h3><p>Tác giả: {item.creatorId}</p><small>{dateTime(item.createdAt)}</small></div>{item.storageUri ? <audio src={item.storageUri} controls style={{ height: 36, borderRadius: 6, maxWidth: 200 }} /> : <button disabled title="Chưa có file audio" aria-label="Phát podcast">▶</button>}</article>)}</section> : <Empty text="Chưa có bản ghi podcast nào" />}{dialog && <div className="modal-backdrop" role="presentation" onMouseDown={() => !creating && setDialog(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="podcast-title" onMouseDown={event => event.stopPropagation()}><div className="panel-title"><div><span className="eyebrow">Creator tools</span><h2 id="podcast-title">Tạo podcast mới</h2></div><button className="icon-button" onClick={() => setDialog(false)} aria-label="Đóng">×</button></div><form className="form compact" onSubmit={create}><label>Creator ID<input name="creatorId" defaultValue={session.user.id} required /></label><label>Room ID<input name="roomId" required /></label><label>Tiêu đề<input name="title" required /></label><label>Storage URI<input name="storageUri" placeholder="s3://recordings/..." required /></label><label>Thời lượng (giây)<input name="durationSeconds" type="number" min="1" required /></label>{error && <p className="error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setDialog(false)}>Hủy</button><button className="primary-button fit" disabled={creating}>{creating ? "Đang tạo…" : "Tạo podcast"}</button></div></form></section></div>}</>;
 }
 
-function CreateRoomDialog({ onClose, session }: { onClose: () => void; session: Session }) {
+function CreateRoomDialog({ onClose, onCreated, session }: { onClose: () => void; onCreated?: (roomCode: string) => void; session: Session }) {
   const [language, setLanguage] = useState("en");
   const [levelNumber, setLevelNumber] = useState(1);
   const [roomCode, setRoomCode] = useState("");
@@ -476,16 +477,19 @@ function CreateRoomDialog({ onClose, session }: { onClose: () => void; session: 
     setError("");
     const form = new FormData(event.currentTarget);
     try {
+      const roomCode = form.get("roomCode") as string;
       await realtimeApi("/rooms", {
         method: "POST",
         body: JSON.stringify({
-          roomCode: form.get("roomCode"),
+          roomCode,
           title: form.get("title") || `${LANGUAGES.find(l => l.code === language)?.name} Level ${levelNumber}`,
           languageCode: language,
           levelNumber,
         }),
       });
       onClose();
+      sessionStorage.setItem("lucy_pending_room", roomCode);
+      window.location.hash = "#/room";
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Không thể tạo phòng");
     } finally {
@@ -652,6 +656,27 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
       liveSocket.on("connect", async () => {
         setConnected(true);
         setError("");
+        const pending = sessionStorage.getItem("lucy_pending_room");
+        if (pending) {
+          sessionStorage.removeItem("lucy_pending_room");
+          const roomCode = pending;
+          setRoomId(roomCode);
+          setShowBrowser(false);
+          setJoined(true);
+          liveSocket!.emit("room:join", { roomId: roomCode, userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
+            if (!result?.ok) { setJoined(false); setShowBrowser(true); return; }
+            setError("");
+            const stream = await startLocalStream();
+            if (!stream || !result.room?.users) return;
+            const others = result.room.users.filter((u: { userId: string }) => u.userId !== session.user.id);
+            for (const user of others) {
+              const pc = await createPeerConnection(user.userId);
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              liveSocket!.emit("webrtc:offer", { targetUserId: user.userId, sdp: offer });
+            }
+          });
+        }
       });
       liveSocket.on("disconnect", () => {
         setConnected(false);
