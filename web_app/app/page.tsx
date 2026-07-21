@@ -737,6 +737,7 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
       mediaRecorderRef.current?.stop();
       mediaRecorderRef.current = null;
     } else {
+      if (recording.audioUrl) URL.revokeObjectURL(recording.audioUrl);
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
       navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
         const recorder = new MediaRecorder(stream, { mimeType: mime });

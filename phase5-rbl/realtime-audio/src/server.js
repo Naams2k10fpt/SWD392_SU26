@@ -10,6 +10,11 @@ import { Server } from "socket.io";
 const port = Number(process.env.PORT || 3020);
 const databaseUrl = process.env.LUCY_DB_URL || "mysql://@localhost:3306/test_lucy_phase5";
 const pool = mysql.createPool(databaseUrl);
+
+// Cleanup stale participants from previous server instance
+pool.execute("UPDATE realtime_room_participants SET left_at = NOW() WHERE left_at IS NULL").catch(() => {});
+pool.execute("UPDATE realtime_rooms SET status = 'EMPTY' WHERE status = 'OPEN' AND id NOT IN (SELECT DISTINCT room_id FROM realtime_room_participants WHERE left_at IS NULL)").catch(() => {});
+
 const app = express();
 const server = http.createServer(app);
 
