@@ -217,7 +217,7 @@ export default function LucyPage() {
     )
   ) : (
     <AppShell route={route} session={session} logout={logout} onCreateRoom={() => setShowCreateRoom(true)}>
-      {route === "/room" && <RoomView session={session} onCreateRoom={() => setShowCreateRoom(true)} pendingRoomCode={pendingRoomCode} onClearPendingRoom={() => setPendingRoomCode("")} />}
+      {route === "/room" && <RoomView session={session} onCreateRoom={() => setShowCreateRoom(true)} />}
       {route === "/wallet" && <WalletView session={session} notify={notify} />}
       {route === "/gifts" && <GiftsView session={session} notify={notify} />}
       {route === "/podcasts" && <PodcastsView session={session} notify={notify} />}
@@ -451,7 +451,7 @@ function PodcastsView({ session, notify }: { session: Session; notify: (message:
     finally { setCreating(false); }
   }
 
-  return <><div className="section-heading"><div><span className="eyebrow">📻 Thư viện</span><h2>Podcast bài học</h2><p>Nghe lại nội dung từ các phòng học LUCY.</p></div>{isSuper && <button className="primary-button fit" onClick={() => { setError(""); setDialog(true); }}>＋ Tạo mới</button>}</div>{error && !dialog && <p className="error banner" role="alert">{error} <button onClick={load}>Thử lại</button></p>}{loading ? <Empty text="Đang tải podcast…" loading /> : items.length ? <section className="podcast-grid">{items.map(item => <article className="podcast-card" key={item.id}><div className="podcast-art"><span>▶</span><small>{duration(item.durationSeconds)}</small></div><div><span className="eyebrow">{item.roomId}</span><h3>{item.title}</h3><p>Tác giả: {item.creatorId}</p><small>{dateTime(item.createdAt)}</small></div>{item.storageUri ? <audio src={item.storageUri.startsWith("http") ? item.storageUri : `${REALTIME_URL}${item.storageUri}`} controls style={{ height: 36, borderRadius: 6, maxWidth: 200 }} /> : <button disabled title="Chưa có file audio" aria-label="Phát podcast">▶</button>}</article>)}</section> : <Empty text="Chưa có bản ghi podcast nào" />}{dialog && <div className="modal-backdrop" role="presentation" onMouseDown={() => !creating && setDialog(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="podcast-title" onMouseDown={event => event.stopPropagation()}><div className="panel-title"><div><span className="eyebrow">Creator tools</span><h2 id="podcast-title">Tạo podcast mới</h2></div><button className="icon-button" onClick={() => setDialog(false)} aria-label="Đóng">×</button></div><form className="form compact" onSubmit={create}><label>Creator ID<input name="creatorId" defaultValue={session.user.id} required /></label><label>Room ID<input name="roomId" required /></label><label>Tiêu đề<input name="title" required /></label><label>Storage URI<input name="storageUri" placeholder="s3://recordings/..." required /></label><label>Thời lượng (giây)<input name="durationSeconds" type="number" min="1" required /></label>{error && <p className="error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setDialog(false)}>Hủy</button><button className="primary-button fit" disabled={creating}>{creating ? "Đang tạo…" : "Tạo podcast"}</button></div></form></section></div>}</>;
+  return <><div className="section-heading"><div><span className="eyebrow">📻 Thư viện</span><h2>Podcast bài học</h2><p>Nghe lại nội dung từ các phòng học LUCY.</p></div>{isSuper && <button className="primary-button fit" onClick={() => { setError(""); setDialog(true); }}>＋ Tạo mới</button>}</div>{error && !dialog && <p className="error banner" role="alert">{error} <button onClick={load}>Thử lại</button></p>}{loading ? <Empty text="Đang tải podcast…" loading /> : items.length ? <section className="podcast-grid">{items.map(item => <article className="podcast-card" key={item.id} style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16 }}><div style={{ display: 'flex', alignItems: 'center', gap: 14 }}><div className="podcast-art"><span>▶</span><small>{duration(item.durationSeconds)}</small></div><div style={{ flex: 1 }}><span className="eyebrow">{item.roomId}</span><h3>{item.title}</h3><p>Tác giả: {item.creatorId}</p><small>{dateTime(item.createdAt)}</small></div></div>{item.storageUri ? <audio src={item.storageUri.startsWith("http") ? item.storageUri : `${REALTIME_URL}${item.storageUri}`} controls style={{ width: '100%', height: 40, borderRadius: 8 }} /> : <button disabled title="Chưa có file audio" aria-label="Phát podcast" style={{ alignSelf: 'flex-start' }}>▶</button>}</article>)}</section> : <Empty text="Chưa có bản ghi podcast nào" />}{dialog && <div className="modal-backdrop" role="presentation" onMouseDown={() => !creating && setDialog(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="podcast-title" onMouseDown={event => event.stopPropagation()}><div className="panel-title"><div><span className="eyebrow">Creator tools</span><h2 id="podcast-title">Tạo podcast mới</h2></div><button className="icon-button" onClick={() => setDialog(false)} aria-label="Đóng">×</button></div><form className="form compact" onSubmit={create}><label>Creator ID<input name="creatorId" defaultValue={session.user.id} required /></label><label>Room ID<input name="roomId" required /></label><label>Tiêu đề<input name="title" required /></label><label>Storage URI<input name="storageUri" placeholder="s3://recordings/..." required /></label><label>Thời lượng (giây)<input name="durationSeconds" type="number" min="1" required /></label>{error && <p className="error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setDialog(false)}>Hủy</button><button className="primary-button fit" disabled={creating}>{creating ? "Đang tạo…" : "Tạo podcast"}</button></div></form></section></div>}</>;
 }
 
 function CreateRoomDialog({ onClose, onCreated, session }: { onClose: () => void; onCreated?: (roomCode: string) => void; session: Session }) {
@@ -489,6 +489,8 @@ function CreateRoomDialog({ onClose, onCreated, session }: { onClose: () => void
       });
       onClose();
       window.location.hash = "#/room";
+      const jr = (window as any).__lucyJoinRoom;
+      if (jr) setTimeout(() => jr(roomCode), 100);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Không thể tạo phòng");
     } finally {
@@ -621,7 +623,7 @@ function RoomBrowser({ session, onJoin, connected, onCreateRoom }: { session: Se
   </div>;
 }
 
-function RoomView({ session, onCreateRoom, pendingRoomCode, onClearPendingRoom }: { session: Session; onCreateRoom?: () => void; pendingRoomCode?: string; onClearPendingRoom?: () => void }) {
+function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: () => void }) {
   const socketRef = useRef<Socket | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
@@ -912,24 +914,12 @@ function RoomView({ session, onCreateRoom, pendingRoomCode, onClearPendingRoom }
     });
   }
 
-  const pendingRef = useRef("");
-
   useEffect(() => {
-    if (pendingRoomCode && !joined) {
-      pendingRef.current = pendingRoomCode;
-      onClearPendingRoom?.();
-      if (socketRef.current?.connected) {
-        joinRoom(pendingRoomCode);
-      }
-    }
-  }, [pendingRoomCode]);
-
-  useEffect(() => {
-    if (socketRef.current?.connected && pendingRef.current) {
-      joinRoom(pendingRef.current);
-      pendingRef.current = "";
-    }
-  }, [connected]);
+    (window as any).__lucyJoinRoom = (code: string) => {
+      if (socketRef.current?.connected) joinRoom(code);
+    };
+    return () => { delete (window as any).__lucyJoinRoom; };
+  }, []);
 
   if (showBrowser) {
     return <RoomBrowser session={session} onJoin={joinRoom} connected={connected} onCreateRoom={onCreateRoom} />;
