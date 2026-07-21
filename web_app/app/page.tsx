@@ -55,7 +55,7 @@ type RecordingState = {
   audioUrl?: string;
   error?: string;
 };
-type RoomInfo = { roomCode: string; title: string; languageCode: string; levelNumber: number; participantCount?: number; status: string };
+type RoomInfo = { roomId: string; title: string; languageCode: string; levelNumber: number; participantCount?: number; status: string };
 type Socket = {
   connected: boolean;
   on<T extends unknown[]>(event: string, callback: (...args: T) => void): Socket;
@@ -605,11 +605,11 @@ function RoomBrowser({ session, onJoin, connected, onCreateRoom }: { session: Se
           return <div key={key} className="room-group">
             <h3>{lang?.name || roomList[0].languageCode} · Level {roomList[0].levelNumber}</h3>
             <div className="room-cards">
-              {roomList.map(r => <button key={r.roomCode} className="room-card" onClick={() => onJoin(r.roomCode)}>
+              {roomList.map(r => <button key={r.roomId} className="room-card" onClick={() => onJoin(r.roomId)}>
                 <span className="room-icon">🎙️</span>
                 <div>
                   <strong>{r.title}</strong>
-                  <small>{r.roomCode} · {r.participantCount || 0} người</small>
+                  <small>{r.roomId} · {r.participantCount || 0} người</small>
                 </div>
                 <span className="join-badge">{connected ? "Tham gia →" : "..."}</span>
               </button>)}
