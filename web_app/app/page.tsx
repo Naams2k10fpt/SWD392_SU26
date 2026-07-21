@@ -606,6 +606,7 @@ function RoomBrowser({ session, onJoin }: { session: Session; onJoin: (roomCode:
 }
 
 function RoomView({ session }: { session: Session }) {
+  const socketRef = useRef<Socket | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [joined, setJoined] = useState(false);
@@ -667,6 +668,7 @@ function RoomView({ session }: { session: Session }) {
         closePeerConnection(userId);
         setRemoteUsers(prev => prev.filter(u => u.userId !== userId));
       });
+      socketRef.current = liveSocket;
       setSocket(liveSocket);
     };
     if (window.io) connect();
@@ -683,8 +685,9 @@ function RoomView({ session }: { session: Session }) {
 
   function join(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!socket || !roomId.trim()) return;
-    socket.emit("room:join", { roomId: roomId.trim(), userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
+    const s = socketRef.current || socket;
+    if (!s || !roomId.trim()) return;
+    s.emit("room:join", { roomId: roomId.trim(), userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
       if (result?.ok) {
         setJoined(true);
         setError("");
@@ -695,30 +698,33 @@ function RoomView({ session }: { session: Session }) {
             const pc = await createPeerConnection(user.userId);
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
-            socket?.emit("webrtc:offer", { targetUserId: user.userId, sdp: offer });
+            s.emit("webrtc:offer", { targetUserId: user.userId, sdp: offer });
           }
         }
       }
       else setError(result?.message || "Không thể vào phòng");
     });
   }
-  function toggleHand() { const next = !hand; socket?.emit("hand:raise", { roomId, raised: next }); setHand(next); }
+  function toggleHand() { const s = socketRef.current || socket; const next = !hand; s?.emit("hand:raise", { roomId, raised: next }); setHand(next); }
   function toggleMic() {
+    const s = socketRef.current || socket;
     const next = !mic;
-    socket?.emit("mic:toggle", { roomId, enabled: next });
+    s?.emit("mic:toggle", { roomId, enabled: next });
     if (localStreamRef.current) {
       localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = next; });
     }
     setMic(next);
   }
   function ping() {
+    const s = socketRef.current || socket;
     const started = Date.now(); setLatency(null);
-    socket?.emit("latency:ping", { clientSentAt: started }, (result: { ok: boolean }) => result?.ok && setLatency(Date.now() - started));
+    s?.emit("latency:ping", { clientSentAt: started }, (result: { ok: boolean }) => result?.ok && setLatency(Date.now() - started));
   }
   function sendChat(event: FormEvent) {
     event.preventDefault();
-    if (!socket || !chatInput.trim() || !joined) return;
-    socket.emit("chat:send", {
+    const s = socketRef.current || socket;
+    if (!s || !chatInput.trim() || !joined) return;
+    s.emit("chat:send", {
       roomId,
       userId: session.user.id,
       displayName: session.user.displayName,
@@ -732,10 +738,11 @@ function RoomView({ session }: { session: Session }) {
   const recordingIdRef = useRef<string | null>(null);
 
   function toggleRecording() {
+    const s = socketRef.current || socket;
     if (recording.status === 'RECORDING') {
       mediaRecorderRef.current?.stop();
       mediaRecorderRef.current = null;
-      socket?.emit("recording:stop", { roomId });
+      s?.emit("recording:stop", { roomId });
     } else {
       navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
         const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4" });
@@ -774,7 +781,7 @@ function RoomView({ session }: { session: Session }) {
         mediaRecorderRef.current = recorder;
         recorder.start();
         setRecording({ status: 'RECORDING' });
-        socket?.emit("recording:start", {
+        s?.emit("recording:start", {
           roomId, userId: session.user.id, displayName: session.user.displayName,
         }, (result: { ok: boolean; recordingId?: string }) => {
           if (result?.ok && result.recordingId) {
@@ -814,8 +821,9 @@ function RoomView({ session }: { session: Session }) {
   const STUN_SERVERS = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
   function getSocketOrThrow(): Socket {
-    if (!socket) throw new Error("Socket not connected");
-    return socket;
+    const s = socketRef.current;
+    if (!s) throw new Error("Socket not connected");
+    return s;
   }
 
   async function createPeerConnection(targetUserId: string) {
@@ -939,7 +947,7 @@ function RoomView({ session }: { session: Session }) {
         <div className="participant-state">
           {room?.raisedHands.includes(person.userId) && <span title="Đang giơ tay">✋</span>}
           <span title={person.micEnabled ? "Mic đang bật" : "Mic đang tắt"}>{person.micEnabled ? "🎤" : "🔇"}</span>
-          {person.userId !== session.user.id && <audio ref={el => { if (el) remoteAudioRefs.current.set(person.userId, el); }} autoPlay playsInline style={{ width: 0, height: 0, position: 'absolute' }} />}
+          {person.userId !== session.user.id && <audio ref={el => { if (el) { remoteAudioRefs.current.set(person.userId, el); const s = remoteStreamsRef.current.get(person.userId); if (s && el.srcObject !== s) { el.srcObject = s; el.play().catch(() => {}); } } }} autoPlay playsInline style={{ width: 0, height: 0, position: 'absolute' }} />}
         </div>
       </article>)}</div> : <Empty text={joined ? "Chưa có người tham gia" : "Nhập mã phòng để xem người tham gia"} />}
     </section>
