@@ -84,6 +84,7 @@ async function serializeRoom(roomCode) {
     title: room.title,
     languageCode: room.language_code,
     levelNumber: room.level_number,
+    participantCount: participants.length,
     createdAt: room.created_at,
     users: participants.map(participant => ({
       participantId: participant.id,
@@ -268,6 +269,11 @@ app.post("/api/upload-recording", upload.single("audio"), async (request, respon
 });
 
 app.use("/recordings", express.static(RECORDINGS_DIR));
+
+app.use((error, _request, response, _next) => {
+  console.error("API Error:", error);
+  response.status(500).json({ message: error.message || "Internal server error" });
+});
 
 io.on("connection", (socket) => {
   socket.data.joinedRooms = new Set();

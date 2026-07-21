@@ -573,8 +573,6 @@ function RoomBrowser({ session, onJoin, connected, onCreateRoom }: { session: Se
     if (manualId.trim()) onJoin(manualId.trim());
   }
 
-  const canCreate = session.user.role === "PRO" || session.user.role === "SUPER";
-
   return <div className="room-browser">
     <div className="section-heading">
       <div>
@@ -582,7 +580,7 @@ function RoomBrowser({ session, onJoin, connected, onCreateRoom }: { session: Se
         <h2>Danh sách phòng</h2>
         <p>Chọn phòng hoặc nhập mã phòng để tham gia.</p>
       </div>
-      {canCreate && <button className="primary-button fit" onClick={onCreateRoom}>＋ Tạo phòng</button>}
+      <button className="primary-button fit" onClick={onCreateRoom}>＋ Tạo phòng</button>
     </div>
     <form className="form compact" onSubmit={handleManualJoin} style={{ margin: '0 0 16px', display: 'flex', gap: 8 }}>
       <input value={manualId} onChange={e => setManualId(e.target.value)} placeholder="Nhập mã phòng..." className="input" style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)' }} />
