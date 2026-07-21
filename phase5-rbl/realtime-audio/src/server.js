@@ -422,7 +422,10 @@ io.on("connection", (socket) => {
         return;
       }
       await pool.execute(
-        "UPDATE recording_logs SET stopped_at = CURRENT_TIMESTAMP WHERE room_id = ? AND status = 'RECORDING'",
+        `UPDATE recording_logs rl
+         JOIN realtime_rooms rr ON rr.id = rl.room_id
+         SET rl.stopped_at = CURRENT_TIMESTAMP
+         WHERE rr.room_code = ? AND rl.status = 'RECORDING'`,
         [roomId]
       );
       acknowledge?.({ ok: true });
