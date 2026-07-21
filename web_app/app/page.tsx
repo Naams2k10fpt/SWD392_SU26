@@ -217,7 +217,7 @@ export default function LucyPage() {
     )
   ) : (
     <AppShell route={route} session={session} logout={logout} onCreateRoom={() => setShowCreateRoom(true)}>
-      {route === "/room" && <RoomView session={session} onCreateRoom={() => setShowCreateRoom(true)} />}
+      {route === "/room" && <RoomView session={session} onCreateRoom={() => setShowCreateRoom(true)} pendingRoomCode={pendingRoomCode} onClearPendingRoom={() => setPendingRoomCode("")} />}
       {route === "/wallet" && <WalletView session={session} notify={notify} />}
       {route === "/gifts" && <GiftsView session={session} notify={notify} />}
       {route === "/podcasts" && <PodcastsView session={session} notify={notify} />}
@@ -225,7 +225,7 @@ export default function LucyPage() {
     </AppShell>
   );
 
-  return <>{content}{toast && <div className="toast" role="status">{toast}</div>}{showCreateRoom && session && <CreateRoomDialog session={session} onClose={() => setShowCreateRoom(false)} />}</>;
+  return <>{content}{toast && <div className="toast" role="status">{toast}</div>}{showCreateRoom && session && <CreateRoomDialog session={session} onClose={() => setShowCreateRoom(false)} onCreated={(code) => { setShowCreateRoom(false); setPendingRoomCode(code); }} />}</>;
 }
 
 function LoginView({ onLogin }: { onLogin: (session: Session) => void }) {
@@ -488,7 +488,6 @@ function CreateRoomDialog({ onClose, onCreated, session }: { onClose: () => void
         }),
       });
       onClose();
-      sessionStorage.setItem("lucy_pending_room", roomCode);
       window.location.hash = "#/room";
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Không thể tạo phòng");
@@ -622,7 +621,7 @@ function RoomBrowser({ session, onJoin, connected, onCreateRoom }: { session: Se
   </div>;
 }
 
-function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: () => void }) {
+function RoomView({ session, onCreateRoom, pendingRoomCode, onClearPendingRoom }: { session: Session; onCreateRoom?: () => void; pendingRoomCode?: string; onClearPendingRoom?: () => void }) {
   const socketRef = useRef<Socket | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
@@ -656,27 +655,6 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
       liveSocket.on("connect", async () => {
         setConnected(true);
         setError("");
-        const pending = sessionStorage.getItem("lucy_pending_room");
-        if (pending) {
-          sessionStorage.removeItem("lucy_pending_room");
-          const roomCode = pending;
-          setRoomId(roomCode);
-          setShowBrowser(false);
-          setJoined(true);
-          liveSocket!.emit("room:join", { roomId: roomCode, userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
-            if (!result?.ok) { setJoined(false); setShowBrowser(true); return; }
-            setError("");
-            const stream = await startLocalStream();
-            if (!stream || !result.room?.users) return;
-            const others = result.room.users.filter((u: { userId: string }) => u.userId !== session.user.id);
-            for (const user of others) {
-              const pc = await createPeerConnection(user.userId);
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-              liveSocket!.emit("webrtc:offer", { targetUserId: user.userId, sdp: offer });
-            }
-          });
-        }
       });
       liveSocket.on("disconnect", () => {
         setConnected(false);
@@ -933,6 +911,14 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
       }
     });
   }
+
+  useEffect(() => {
+    if (pendingRoomCode && !joined) {
+      const code = pendingRoomCode;
+      onClearPendingRoom?.();
+      joinRoom(code);
+    }
+  }, [pendingRoomCode]);
 
   if (showBrowser) {
     return <RoomBrowser session={session} onJoin={joinRoom} connected={connected} onCreateRoom={onCreateRoom} />;
