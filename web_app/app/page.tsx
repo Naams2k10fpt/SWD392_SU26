@@ -529,11 +529,12 @@ function CreateRoomDialog({ onClose, session }: { onClose: () => void; session: 
   </div>;
 }
 
-function RoomBrowser({ session, onJoin }: { session: Session; onJoin: (roomCode: string) => void }) {
+function RoomBrowser({ session, onJoin, connected }: { session: Session; onJoin: (roomCode: string) => void; connected: boolean }) {
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filterLang, setFilterLang] = useState("");
+  const [manualId, setManualId] = useState("");
 
   const LANGUAGES = [
     { code: "en", name: "English" },
@@ -567,20 +568,29 @@ function RoomBrowser({ session, onJoin }: { session: Session; onJoin: (roomCode:
     return Array.from(map.entries()).sort();
   }, [rooms]);
 
+  function handleManualJoin(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (manualId.trim()) onJoin(manualId.trim());
+  }
+
   return <div className="room-browser">
     <div className="section-heading">
       <div>
         <span className="eyebrow">🎙️ Phòng học</span>
         <h2>Danh sách phòng</h2>
-        <p>Chọn phòng để tham gia học tập cùng nhóm.</p>
+        <p>Chọn phòng hoặc nhập mã phòng để tham gia.</p>
       </div>
-      <div className="filter-row">
-        <select value={filterLang} onChange={e => setFilterLang(e.target.value)}>
-          <option value="">Tất cả ngôn ngữ</option>
-          {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
-        </select>
-        <button className="text-button" onClick={load} disabled={loading}>⟳ Làm mới</button>
-      </div>
+    </div>
+    <form className="form compact" onSubmit={handleManualJoin} style={{ margin: '0 0 16px', display: 'flex', gap: 8 }}>
+      <input value={manualId} onChange={e => setManualId(e.target.value)} placeholder="Nhập mã phòng..." className="input" style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)' }} />
+      <button className="primary-button" disabled={!connected || !manualId.trim()} type="submit">Vào phòng</button>
+    </form>
+    <div className="filter-row" style={{ marginBottom: 12 }}>
+      <select value={filterLang} onChange={e => setFilterLang(e.target.value)}>
+        <option value="">Tất cả ngôn ngữ</option>
+        {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+      </select>
+      <button className="text-button" onClick={load} disabled={loading}>⟳ Làm mới</button>
     </div>
     {error && <p className="error banner" role="alert">{error} <button onClick={load}>Thử lại</button></p>}
     {loading ? <div className="empty"><span className="spinner" /><p>Đang tải phòng…</p></div>
@@ -613,11 +623,11 @@ function RoomView({ session }: { session: Session }) {
   const [joined, setJoined] = useState(false);
   const [roomId, setRoomId] = useState("");
   const [room, setRoom] = useState<Room | null>(null);
+  const [showBrowser, setShowBrowser] = useState(true);
   const [mic, setMic] = useState(true);
   const [hand, setHand] = useState(false);
   const [latency, setLatency] = useState<number | null>(null);
   const [error, setError] = useState("");
-  const [showBrowser, setShowBrowser] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [recording, setRecording] = useState<RecordingState>({ status: 'NONE' });
@@ -627,7 +637,7 @@ function RoomView({ session }: { session: Session }) {
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const remoteStreamsRef = useRef<Map<string, MediaStream>>(new Map());
   const remoteAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const pendingAutoJoinRef = useRef<string | null>(null);
+
 
   useEffect(() => {
     let active = true;
@@ -640,27 +650,6 @@ function RoomView({ session }: { session: Session }) {
       liveSocket.on("connect", async () => {
         setConnected(true);
         setError("");
-        const pendingRoom = pendingAutoJoinRef.current;
-        if (pendingRoom) {
-          pendingAutoJoinRef.current = null;
-          setRoomId(pendingRoom);
-          setShowBrowser(false);
-          setJoined(true);
-          const io = liveSocket!;
-          io.emit("room:join", { roomId: pendingRoom, userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
-            if (!result?.ok) { setJoined(false); return; }
-            setError("");
-            const stream = await startLocalStream();
-            if (!stream || !result.room?.users) return;
-            const others = result.room.users.filter((u: { userId: string }) => u.userId !== session.user.id);
-            for (const user of others) {
-              const pc = await createPeerConnection(user.userId);
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-              io.emit("webrtc:offer", { targetUserId: user.userId, sdp: offer });
-            }
-          });
-        }
       });
       liveSocket.on("disconnect", () => {
         setConnected(false);
@@ -711,28 +700,6 @@ function RoomView({ session }: { session: Session }) {
     return () => { active = false; liveSocket?.off(); liveSocket?.disconnect(); };
   }, []);
 
-  function join(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const s = socketRef.current || socket;
-    if (!s || !roomId.trim()) return;
-    s.emit("room:join", { roomId: roomId.trim(), userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
-      if (result?.ok) {
-        setJoined(true);
-        setError("");
-        const stream = await startLocalStream();
-        if (stream && result.room?.users) {
-          const others = result.room.users.filter(u => u.userId !== session.user.id);
-          for (const user of others) {
-            const pc = await createPeerConnection(user.userId);
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            s.emit("webrtc:offer", { targetUserId: user.userId, sdp: offer });
-          }
-        }
-      }
-      else setError(result?.message || "Không thể vào phòng");
-    });
-  }
   function toggleHand() { const s = socketRef.current || socket; const next = !hand; s?.emit("hand:raise", { roomId, raised: next }); setHand(next); }
   function toggleMic() {
     const s = socketRef.current || socket;
@@ -924,50 +891,39 @@ function RoomView({ session }: { session: Session }) {
 
   const participants = useMemo(() => room?.users || [], [room]);
 
-  if (showBrowser) {
-    return <RoomBrowser session={session} onJoin={(code) => {
-      const s = socketRef.current;
-      setRoomId(code);
-      setShowBrowser(false);
-      setJoined(true);
-      if (s?.connected) {
-        s.emit("room:join", { roomId: code, userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
-          if (!result?.ok) { setJoined(false); return; }
-          setError("");
-          const stream = await startLocalStream();
-          if (!stream || !result.room?.users) return;
-          const others = result.room.users.filter((u: { userId: string }) => u.userId !== session.user.id);
-          for (const user of others) {
-            const pc = await createPeerConnection(user.userId);
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            s.emit("webrtc:offer", { targetUserId: user.userId, sdp: offer });
-          }
-        });
-      } else {
-        pendingAutoJoinRef.current = code;
+  function joinRoom(code: string) {
+    const s = socketRef.current || socket;
+    if (!s || !code.trim() || joined) return;
+    setRoomId(code);
+    setShowBrowser(false);
+    setJoined(true);
+    s.emit("room:join", { roomId: code, userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
+      if (!result?.ok) { setJoined(false); setShowBrowser(true); return; }
+      setError("");
+      const stream = await startLocalStream();
+      if (!stream || !result.room?.users) return;
+      const others = result.room.users.filter((u: { userId: string }) => u.userId !== session.user.id);
+      for (const user of others) {
+        const pc = await createPeerConnection(user.userId);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        s.emit("webrtc:offer", { targetUserId: user.userId, sdp: offer });
       }
-    }} />;
+    });
+  }
+
+  if (showBrowser) {
+    return <RoomBrowser session={session} onJoin={joinRoom} connected={connected} />;
   }
 
   return <div className="room-layout">
     <section className="panel room-controls">
       <div className="connection"><i className={connected ? "connected" : ""} />{connected ? "Đã kết nối" : "Đang kết nối"}{latency !== null && <span>{latency} ms</span>}</div>
       <span className="eyebrow">🎙️ Phòng học trực tiếp</span>
-      <h2>{joined ? `📌 ${room?.title || roomId}` : "Tham gia phòng học"}</h2>
-      {!joined ? (
-        <>
-          <form className="form compact" onSubmit={join}>
-            <label>Room ID<input value={roomId} onChange={event => setRoomId(event.target.value)} placeholder="english-level-1" required disabled={!connected} /></label>
-            <button className="primary-button" disabled={!connected}>Join Room</button>
-          </form>
-          <button className="text-button" onClick={() => setShowBrowser(true)} style={{ marginTop: 8 }}>← Danh sách phòng</button>
-        </>
-      ) : (
-        <div style={{ margin: '12px 0', fontSize: 14, color: 'var(--muted)' }}>
-          {room?.languageCode === "en" ? "English" : room?.languageCode === "zh" ? "Chinese" : "Japanese"} · Stage {Math.ceil((room?.levelNumber || 1) / 30)} · Level {room?.levelNumber}
-        </div>
-      )}
+      <h2>📌 {room?.title || roomId}</h2>
+      <div style={{ margin: '12px 0', fontSize: 14, color: 'var(--muted)' }}>
+        {room?.languageCode === "en" ? "English" : room?.languageCode === "zh" ? "Chinese" : "Japanese"} · Stage {Math.ceil((room?.levelNumber || 1) / 30)} · Level {room?.levelNumber}
+      </div>
       {error && <p className="error" role="alert">{error}</p>}
       {joined && <div className="room-actions">
         <button className={hand ? "selected" : ""} onClick={toggleHand}>✋ {hand ? "Hạ tay" : "Giơ tay"}</button>
