@@ -449,7 +449,7 @@ function PodcastsView({ session, notify }: { session: Session; notify: (message:
     finally { setCreating(false); }
   }
 
-  return <><div className="section-heading"><div><span className="eyebrow">📻 Thư viện</span><h2>Podcast bài học</h2><p>Nghe lại nội dung từ các phòng học LUCY.</p></div>{isSuper && <button className="primary-button fit" onClick={() => { setError(""); setDialog(true); }}>＋ Tạo mới</button>}</div>{error && !dialog && <p className="error banner" role="alert">{error} <button onClick={load}>Thử lại</button></p>}{loading ? <Empty text="Đang tải podcast…" loading /> : items.length ? <section className="podcast-grid">{items.map(item => <article className="podcast-card" key={item.id}><div className="podcast-art"><span>▶</span><small>{duration(item.durationSeconds)}</small></div><div><span className="eyebrow">{item.roomId}</span><h3>{item.title}</h3><p>Tác giả: {item.creatorId}</p><small>{dateTime(item.createdAt)}</small></div><button disabled title="Bản demo chỉ lưu metadata" aria-label="Phát podcast">▶</button></article>)}</section> : <Empty text="Chưa có bản ghi podcast nào" />}{dialog && <div className="modal-backdrop" role="presentation" onMouseDown={() => !creating && setDialog(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="podcast-title" onMouseDown={event => event.stopPropagation()}><div className="panel-title"><div><span className="eyebrow">Creator tools</span><h2 id="podcast-title">Tạo podcast mới</h2></div><button className="icon-button" onClick={() => setDialog(false)} aria-label="Đóng">×</button></div><form className="form compact" onSubmit={create}><label>Creator ID<input name="creatorId" defaultValue={session.user.id} required /></label><label>Room ID<input name="roomId" required /></label><label>Tiêu đề<input name="title" required /></label><label>Storage URI<input name="storageUri" placeholder="s3://recordings/..." required /></label><label>Thời lượng (giây)<input name="durationSeconds" type="number" min="1" required /></label>{error && <p className="error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setDialog(false)}>Hủy</button><button className="primary-button fit" disabled={creating}>{creating ? "Đang tạo…" : "Tạo podcast"}</button></div></form></section></div>}</>;
+  return <><div className="section-heading"><div><span className="eyebrow">📻 Thư viện</span><h2>Podcast bài học</h2><p>Nghe lại nội dung từ các phòng học LUCY.</p></div>{isSuper && <button className="primary-button fit" onClick={() => { setError(""); setDialog(true); }}>＋ Tạo mới</button>}</div>{error && !dialog && <p className="error banner" role="alert">{error} <button onClick={load}>Thử lại</button></p>}{loading ? <Empty text="Đang tải podcast…" loading /> : items.length ? <section className="podcast-grid">{items.map(item => <article className="podcast-card" key={item.id}><div className="podcast-art"><span>▶</span><small>{duration(item.durationSeconds)}</small></div><div><span className="eyebrow">{item.roomId}</span><h3>{item.title}</h3><p>Tác giả: {item.creatorId}</p><small>{dateTime(item.createdAt)}</small></div>{item.storageUri ? <audio src={item.storageUri} controls style={{ height: 36, borderRadius: 6, maxWidth: 200 }} /> : <button disabled title="Chưa có file audio" aria-label="Phát podcast">▶</button>}</article>)}</section> : <Empty text="Chưa có bản ghi podcast nào" />}{dialog && <div className="modal-backdrop" role="presentation" onMouseDown={() => !creating && setDialog(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="podcast-title" onMouseDown={event => event.stopPropagation()}><div className="panel-title"><div><span className="eyebrow">Creator tools</span><h2 id="podcast-title">Tạo podcast mới</h2></div><button className="icon-button" onClick={() => setDialog(false)} aria-label="Đóng">×</button></div><form className="form compact" onSubmit={create}><label>Creator ID<input name="creatorId" defaultValue={session.user.id} required /></label><label>Room ID<input name="roomId" required /></label><label>Tiêu đề<input name="title" required /></label><label>Storage URI<input name="storageUri" placeholder="s3://recordings/..." required /></label><label>Thời lượng (giây)<input name="durationSeconds" type="number" min="1" required /></label>{error && <p className="error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setDialog(false)}>Hủy</button><button className="primary-button fit" disabled={creating}>{creating ? "Đang tạo…" : "Tạo podcast"}</button></div></form></section></div>}</>;
 }
 
 function CreateRoomDialog({ onClose, session }: { onClose: () => void; session: Session }) {
@@ -619,6 +619,12 @@ function RoomView({ session }: { session: Session }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [recording, setRecording] = useState<RecordingState>({ status: 'NONE' });
+  const [remoteUsers, setRemoteUsers] = useState<{ userId: string; displayName: string }[]>([]);
+
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const remoteStreamsRef = useRef<Map<string, MediaStream>>(new Map());
+  const remoteAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
 
   useEffect(() => {
     let active = true;
@@ -627,14 +633,39 @@ function RoomView({ session }: { session: Session }) {
       if (!active || !window.io) return;
       liveSocket = window.io(REALTIME_URL, { transports: ["websocket"] });
       liveSocket.on("connect", () => { setConnected(true); setError(""); });
-      liveSocket.on("disconnect", () => { setConnected(false); setJoined(false); });
+      liveSocket.on("disconnect", () => {
+        setConnected(false);
+        setJoined(false);
+        stopLocalStream();
+        peerConnectionsRef.current.forEach(pc => pc.close());
+        peerConnectionsRef.current.clear();
+        remoteStreamsRef.current.clear();
+        remoteAudioRefs.current.clear();
+        setRemoteUsers([]);
+      });
       liveSocket.on("connect_error", () => setError("Không thể kết nối Realtime service"));
       liveSocket.on("room:state", (state: Room) => setRoom(state));
       liveSocket.on("chat:message", (msg: ChatMessage) => {
         setMessages(prev => [...prev, msg]);
       });
       liveSocket.on("recording:update", (state: RecordingState) => {
-        setRecording(prev => ({ ...prev, ...state, audioUrl: state.status === 'RECORDING' ? undefined : prev.audioUrl }));
+        setRecording(prev => ({ ...prev, ...state }));
+      });
+      liveSocket.on("webrtc:offer", ({ userId, sdp }: { userId: string; sdp: RTCSessionDescriptionInit }) => {
+        handleWebRTCOffer(userId, sdp);
+      });
+      liveSocket.on("webrtc:answer", ({ userId, sdp }: { userId: string; sdp: RTCSessionDescriptionInit }) => {
+        handleWebRTCAnswer(userId, sdp);
+      });
+      liveSocket.on("webrtc:ice-candidate", ({ userId, candidate }: { userId: string; candidate: RTCIceCandidateInit }) => {
+        handleWebRTCIceCandidate(userId, candidate);
+      });
+      liveSocket.on("webrtc:user-joined", ({ userId, displayName }: { userId: string; displayName: string }) => {
+        setRemoteUsers(prev => prev.some(u => u.userId === userId) ? prev : [...prev, { userId, displayName }]);
+      });
+      liveSocket.on("webrtc:user-left", ({ userId }: { userId: string }) => {
+        closePeerConnection(userId);
+        setRemoteUsers(prev => prev.filter(u => u.userId !== userId));
       });
       setSocket(liveSocket);
     };
@@ -653,13 +684,33 @@ function RoomView({ session }: { session: Session }) {
   function join(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!socket || !roomId.trim()) return;
-    socket.emit("room:join", { roomId: roomId.trim(), userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, (result: { ok: boolean; message?: string }) => {
-      if (result?.ok) { setJoined(true); setError(""); }
+    socket.emit("room:join", { roomId: roomId.trim(), userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
+      if (result?.ok) {
+        setJoined(true);
+        setError("");
+        const stream = await startLocalStream();
+        if (stream && result.room?.users) {
+          const others = result.room.users.filter(u => u.userId !== session.user.id);
+          for (const user of others) {
+            const pc = await createPeerConnection(user.userId);
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            socket?.emit("webrtc:offer", { targetUserId: user.userId, sdp: offer });
+          }
+        }
+      }
       else setError(result?.message || "Không thể vào phòng");
     });
   }
   function toggleHand() { const next = !hand; socket?.emit("hand:raise", { roomId, raised: next }); setHand(next); }
-  function toggleMic() { const next = !mic; socket?.emit("mic:toggle", { roomId, enabled: next }); setMic(next); }
+  function toggleMic() {
+    const next = !mic;
+    socket?.emit("mic:toggle", { roomId, enabled: next });
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = next; });
+    }
+    setMic(next);
+  }
   function ping() {
     const started = Date.now(); setLatency(null);
     socket?.emit("latency:ping", { clientSentAt: started }, (result: { ok: boolean }) => result?.ok && setLatency(Date.now() - started));
@@ -678,6 +729,7 @@ function RoomView({ session }: { session: Session }) {
   }
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const recordingIdRef = useRef<string | null>(null);
 
   function toggleRecording() {
     if (recording.status === 'RECORDING') {
@@ -688,14 +740,31 @@ function RoomView({ session }: { session: Session }) {
       navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
         const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4" });
         audioChunksRef.current = [];
+        recordingIdRef.current = null;
         recorder.ondataavailable = e => {
           if (e.data.size > 0) audioChunksRef.current.push(e.data);
         };
         recorder.onstop = () => {
           stream.getTracks().forEach(t => t.stop());
           const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
-          const url = URL.createObjectURL(blob);
-          setRecording(prev => ({ ...prev, status: 'SAVED', audioUrl: url }));
+          const rid = recordingIdRef.current;
+          if (rid) {
+            const formData = new FormData();
+            formData.append("audio", blob, `recording-${rid}.webm`);
+            formData.append("recordingId", rid);
+            fetch(`${REALTIME_URL}/api/upload-recording`, {
+              method: "POST",
+              body: formData,
+            }).then(res => res.json()).then(data => {
+              if (data.ok) {
+                setRecording(prev => ({ ...prev, status: 'SAVED', audioUrl: data.storageUri }));
+              } else {
+                fallbackLocalUrl(blob);
+              }
+            }).catch(() => fallbackLocalUrl(blob));
+          } else {
+            fallbackLocalUrl(blob);
+          }
           audioChunksRef.current = [];
         };
         recorder.onerror = () => {
@@ -707,11 +776,114 @@ function RoomView({ session }: { session: Session }) {
         setRecording({ status: 'RECORDING' });
         socket?.emit("recording:start", {
           roomId, userId: session.user.id, displayName: session.user.displayName,
+        }, (result: { ok: boolean; recordingId?: string }) => {
+          if (result?.ok && result.recordingId) {
+            recordingIdRef.current = result.recordingId;
+            setRecording(prev => ({ ...prev, recordingId: result.recordingId }));
+          }
         });
       }).catch(err => {
         setRecording({ status: 'ERROR', error: "Không thể truy cập micro: " + err.message });
       });
     }
+  }
+
+  function fallbackLocalUrl(blob: Blob) {
+    const url = URL.createObjectURL(blob);
+    setRecording(prev => ({ ...prev, status: 'SAVED', audioUrl: url }));
+  }
+
+  async function startLocalStream() {
+    if (localStreamRef.current) return localStreamRef.current;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      localStreamRef.current = stream;
+      return stream;
+    } catch {
+      return null;
+    }
+  }
+
+  function stopLocalStream() {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(t => t.stop());
+      localStreamRef.current = null;
+    }
+  }
+
+  const STUN_SERVERS = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+  function getSocketOrThrow(): Socket {
+    if (!socket) throw new Error("Socket not connected");
+    return socket;
+  }
+
+  async function createPeerConnection(targetUserId: string) {
+    const pc = new RTCPeerConnection(STUN_SERVERS);
+    peerConnectionsRef.current.set(targetUserId, pc);
+
+    const localStream = localStreamRef.current;
+    if (localStream) {
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        getSocketOrThrow().emit("webrtc:ice-candidate", { targetUserId, candidate: e.candidate.toJSON() });
+      }
+    };
+
+    pc.ontrack = (e) => {
+      const remoteStream = e.streams[0];
+      if (remoteStream) {
+        remoteStreamsRef.current.set(targetUserId, remoteStream);
+        const audioEl = remoteAudioRefs.current.get(targetUserId);
+        if (audioEl) {
+          audioEl.srcObject = remoteStream;
+          audioEl.play().catch(() => {});
+        }
+        setRemoteUsers(prev => prev.some(u => u.userId === targetUserId) ? prev : [...prev, { userId: targetUserId, displayName: "" }]);
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
+        closePeerConnection(targetUserId);
+      }
+    };
+
+    return pc;
+  }
+
+  async function handleWebRTCOffer(userId: string, sdp: RTCSessionDescriptionInit) {
+    const pc = await createPeerConnection(userId);
+    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    getSocketOrThrow().emit("webrtc:answer", { targetUserId: userId, sdp: answer });
+  }
+
+  async function handleWebRTCAnswer(userId: string, sdp: RTCSessionDescriptionInit) {
+    const pc = peerConnectionsRef.current.get(userId);
+    if (pc) {
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    }
+  }
+
+  function handleWebRTCIceCandidate(userId: string, candidate: RTCIceCandidateInit) {
+    const pc = peerConnectionsRef.current.get(userId);
+    if (pc) {
+      pc.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+  }
+
+  function closePeerConnection(userId: string) {
+    const pc = peerConnectionsRef.current.get(userId);
+    if (pc) {
+      pc.close();
+      peerConnectionsRef.current.delete(userId);
+    }
+    remoteStreamsRef.current.delete(userId);
   }
 
   const participants = useMemo(() => room?.users || [], [room]);
@@ -767,6 +939,7 @@ function RoomView({ session }: { session: Session }) {
         <div className="participant-state">
           {room?.raisedHands.includes(person.userId) && <span title="Đang giơ tay">✋</span>}
           <span title={person.micEnabled ? "Mic đang bật" : "Mic đang tắt"}>{person.micEnabled ? "🎤" : "🔇"}</span>
+          {person.userId !== session.user.id && <audio ref={el => { if (el) remoteAudioRefs.current.set(person.userId, el); }} autoPlay playsInline style={{ width: 0, height: 0, position: 'absolute' }} />}
         </div>
       </article>)}</div> : <Empty text={joined ? "Chưa có người tham gia" : "Nhập mã phòng để xem người tham gia"} />}
     </section>
