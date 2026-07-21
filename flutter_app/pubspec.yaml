@@ -16,6 +16,9 @@ dependencies:
   http: ^1.2.0
   socket_io_client: ^2.0.3+1
 
+  # Audio playback
+  audioplayers: ^6.1.0
+
   # State management
   provider: ^6.1.1
 

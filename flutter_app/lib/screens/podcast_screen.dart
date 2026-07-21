@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:lucy_app/services/auth_provider.dart';
 import 'package:lucy_app/services/wallet_service.dart';
 import 'package:lucy_app/models/podcast_recording.dart';
@@ -12,14 +13,57 @@ class PodcastScreen extends StatefulWidget {
 }
 
 class _PodcastScreenState extends State<PodcastScreen> {
+  final AudioPlayer _audioPlayer = AudioPlayer();
   List<PodcastRecording> _recordings = [];
   bool _loading = false;
   String? _error;
+  String? _playingId;
+  bool _isPlaying = false;
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
 
   @override
   void initState() {
     super.initState();
+    _audioPlayer.onPositionChanged.listen((p) {
+      if (mounted) setState(() => _position = p);
+    });
+    _audioPlayer.onDurationChanged.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
+    _audioPlayer.onPlayerComplete.listen((_) {
+      if (mounted) setState(() { _isPlaying = false; _playingId = null; _position = Duration.zero; });
+    });
     _loadRecordings();
+  }
+
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  Future<void> _togglePlay(PodcastRecording recording) async {
+    if (_playingId == recording.id && _isPlaying) {
+      await _audioPlayer.pause();
+      setState(() => _isPlaying = false);
+    } else if (_playingId == recording.id) {
+      await _audioPlayer.resume();
+      setState(() => _isPlaying = true);
+    } else {
+      final url = recording.storageUri;
+      if (url.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Podcast chưa có file audio')),
+          );
+        }
+        return;
+      }
+      await _audioPlayer.stop();
+      await _audioPlayer.play(UrlSource(url));
+      setState(() { _playingId = recording.id; _isPlaying = true; _position = Duration.zero; });
+    }
   }
 
   Future<void> _loadRecordings() async {
@@ -260,6 +304,49 @@ class _PodcastScreenState extends State<PodcastScreen> {
       appBar: AppBar(
         title: const Text('📻 Podcast'),
       ),
+      bottomSheet: _playingId != null
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                border: Border(top: BorderSide(color: theme.colorScheme.outlineVariant)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _duration.inSeconds > 0
+                        ? Slider(
+                            value: _position.inSeconds.toDouble().clamp(0, _duration.inSeconds.toDouble()),
+                            max: _duration.inSeconds.toDouble().clamp(1, double.infinity),
+                            onChanged: (v) => _audioPlayer.seek(Duration(seconds: v.toInt())),
+                          )
+                        : const LinearProgressIndicator(),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${_position.inSeconds ~/ 60}:${(_position.inSeconds % 60).toString().padLeft(2, '0')}',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  IconButton(
+                    icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
+                    onPressed: () {
+                      if (_playingId != null) {
+                        final rec = _recordings.where((r) => r.id == _playingId).firstOrNull;
+                        if (rec != null) _togglePlay(rec);
+                      }
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () async {
+                      await _audioPlayer.stop();
+                      setState(() { _playingId = null; _isPlaying = false; _position = Duration.zero; });
+                    },
+                  ),
+                ],
+              ),
+            )
+          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -372,10 +459,23 @@ class _PodcastScreenState extends State<PodcastScreen> {
                                   ],
                                 ),
                               ),
-                              trailing: Icon(
-                                Icons.play_circle_fill,
-                                color: theme.colorScheme.primary,
-                                size: 32,
+                              trailing: InkWell(
+                                borderRadius: BorderRadius.circular(20),
+                                onTap: () => _togglePlay(recording),
+                                child: _playingId == recording.id && _isPlaying
+                                    ? Icon(Icons.pause_circle_filled,
+                                        color: theme.colorScheme.primary, size: 36)
+                                    : _playingId == recording.id
+                                        ? SizedBox(
+                                            width: 36,
+                                            height: 36,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: theme.colorScheme.primary,
+                                            ),
+                                          )
+                                        : Icon(Icons.play_circle_fill,
+                                            color: theme.colorScheme.primary, size: 36),
                               ),
                             ),
                           );
