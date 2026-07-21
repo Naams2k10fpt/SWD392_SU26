@@ -912,13 +912,24 @@ function RoomView({ session, onCreateRoom, pendingRoomCode, onClearPendingRoom }
     });
   }
 
+  const pendingRef = useRef("");
+
   useEffect(() => {
     if (pendingRoomCode && !joined) {
-      const code = pendingRoomCode;
+      pendingRef.current = pendingRoomCode;
       onClearPendingRoom?.();
-      joinRoom(code);
+      if (socketRef.current?.connected) {
+        joinRoom(pendingRoomCode);
+      }
     }
   }, [pendingRoomCode]);
+
+  useEffect(() => {
+    if (socketRef.current?.connected && pendingRef.current) {
+      joinRoom(pendingRef.current);
+      pendingRef.current = "";
+    }
+  }, [connected]);
 
   if (showBrowser) {
     return <RoomBrowser session={session} onJoin={joinRoom} connected={connected} onCreateRoom={onCreateRoom} />;
