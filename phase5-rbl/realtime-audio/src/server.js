@@ -1,6 +1,8 @@
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
+import { unlink } from "node:fs/promises";
 import cors from "cors";
 import express from "express";
 import multer from "multer";
@@ -16,7 +18,26 @@ const server = http.createServer(app);
 
 const RECORDINGS_DIR = path.resolve("recordings");
 if (!existsSync(RECORDINGS_DIR)) mkdirSync(RECORDINGS_DIR, { recursive: true });
-const upload = multer({ dest: RECORDINGS_DIR, limits: { fileSize: 50 * 1024 * 1024 } });
+const AUDIO_EXTENSIONS = new Map([
+  ["audio/webm", ".webm"],
+  ["audio/mp4", ".m4a"],
+  ["audio/wav", ".wav"],
+  ["audio/x-wav", ".wav"],
+  ["audio/mpeg", ".mp3"],
+  ["audio/ogg", ".ogg"],
+]);
+const audioExtension = mimeType => AUDIO_EXTENSIONS.get(mimeType.split(";", 1)[0].toLowerCase()) || null;
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: RECORDINGS_DIR,
+    filename: (_request, file, callback) => {
+      const extension = audioExtension(file.mimetype);
+      callback(extension ? null : Object.assign(new Error("Unsupported audio type"), { status: 400 }), extension ? `${randomUUID()}${extension}` : undefined);
+    },
+  }),
+  fileFilter: (_request, file, callback) => callback(audioExtension(file.mimetype) ? null : Object.assign(new Error("Only WebM, M4A, WAV, MP3 or OGG audio is supported"), { status: 400 }), Boolean(audioExtension(file.mimetype))),
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
 const io = new Server(server, {
   cors: {
     origin: process.env.CORS_ORIGIN || "*",
@@ -238,22 +259,32 @@ app.get("/rooms/:roomCode/recordings", async (request, response, next) => {
 });
 
 app.post("/api/upload-recording", upload.single("audio"), async (request, response, next) => {
+  let podcastSaved = false;
   try {
-    const { roomCode, userId, displayName } = request.body;
+    const { roomCode, userId } = request.body;
     const file = request.file;
-    if (!roomCode || !file) {
-      response.status(400).json({ message: "roomCode and audio file are required" });
+    const durationSeconds = Math.round(Number(request.body.durationSeconds));
+    if (!roomCode || !file || !Number.isFinite(durationSeconds) || durationSeconds < 1) {
+      if (file) await unlink(file.path).catch(() => {});
+      response.status(400).json({ message: "roomCode, audio file and positive durationSeconds are required" });
       return;
     }
     const storageUri = `/recordings/${file.filename}`;
     const room = await ensureRoom(roomCode);
     await pool.execute(
-      "INSERT INTO podcast_recordings (creator_external_id, room_code, title, storage_uri, duration_seconds) VALUES (?, ?, ?, ?, 0)",
-      [userId || "anonymous", roomCode, `Recording - ${room.title || roomCode}`, storageUri]
+      "INSERT INTO podcast_recordings (creator_external_id, room_code, title, storage_uri, duration_seconds) VALUES (?, ?, ?, ?, ?)",
+      [userId || "anonymous", roomCode, `Recording - ${room.title || roomCode}`, storageUri, durationSeconds]
     );
-    io.to(roomCode).emit("recording:update", { status: "SAVED", audioUrl: storageUri });
-    response.json({ ok: true, storageUri });
+    podcastSaved = true;
+    await pool.execute(
+      "UPDATE recording_logs SET status = 'SAVED', storage_uri = ?, duration_seconds = ?, stopped_at = COALESCE(stopped_at, CURRENT_TIMESTAMP) WHERE room_id = ? AND started_by = ? AND status IN ('RECORDING', 'STOPPED') ORDER BY started_at DESC LIMIT 1",
+      [storageUri, durationSeconds, room.id, userId || "anonymous"]
+    ).catch(error => console.error("Recording log update failed:", error));
+    const audioUrl = `${request.protocol}://${request.get("host")}${storageUri}`;
+    io.to(roomCode).emit("recording:update", { status: "SAVED", audioUrl, durationSeconds });
+    response.json({ ok: true, storageUri, audioUrl, durationSeconds });
   } catch (error) {
+    if (!podcastSaved && request.file) await unlink(request.file.path).catch(() => {});
     next(error);
   }
 });
@@ -262,7 +293,7 @@ app.use("/recordings", express.static(RECORDINGS_DIR));
 
 app.use((error, _request, response, _next) => {
   console.error("API Error:", error);
-  response.status(500).json({ message: error.message || "Internal server error" });
+  response.status(error.status || (error instanceof multer.MulterError ? 400 : 500)).json({ message: error.message || "Internal server error" });
 });
 
 io.on("connection", (socket) => {
@@ -420,7 +451,7 @@ io.on("connection", (socket) => {
       await pool.execute(
         `UPDATE recording_logs rl
          JOIN realtime_rooms rr ON rr.id = rl.room_id
-         SET rl.stopped_at = CURRENT_TIMESTAMP
+         SET rl.status = 'STOPPED', rl.stopped_at = CURRENT_TIMESTAMP
          WHERE rr.room_code = ? AND rl.status = 'RECORDING'`,
         [roomId]
       );
@@ -501,4 +532,4 @@ if (!process.env.LUCY_TEST) {
   });
 }
 
-export { app, parseRoomCode, server };
+export { app, audioExtension, parseRoomCode, server };

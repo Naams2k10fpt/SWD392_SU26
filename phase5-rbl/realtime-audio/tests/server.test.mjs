@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+process.env.LUCY_TEST = "1";
+
 // ── parseRoomCode unit tests ──────────────────────────────────
 
 test("parseRoomCode: en-s1-l5-xxx", async () => {
@@ -74,6 +76,13 @@ test("Express app is exportable", async () => {
   const { app } = await import("../src/server.js");
   assert.ok(app, "Express app is exported");
   assert.equal(typeof app.listen, "function", "app has listen method");
+});
+
+test("audioExtension: keeps audio-only file extensions", async () => {
+  const { audioExtension } = await import("../src/server.js");
+  assert.equal(audioExtension("audio/webm;codecs=opus"), ".webm");
+  assert.equal(audioExtension("audio/mp4"), ".m4a");
+  assert.equal(audioExtension("video/webm"), null);
 });
 
 test("POST /rooms: validates required fields", { skip: "Requires running MariaDB" }, async () => {

@@ -31,8 +31,9 @@ async function proxy(request: Request, context: Context) {
     const responseHeaders = new Headers();
     const contentType = upstream.headers.get("content-type");
     if (contentType) responseHeaders.set("content-type", contentType);
-    return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
-  } catch {
+    return new Response(await upstream.arrayBuffer(), { status: upstream.status, headers: responseHeaders });
+  } catch (error) {
+    console.error("Backend proxy error:", error);
     return Response.json({ message: "Không thể kết nối backend service" }, { status: 502 });
   }
 }

@@ -23,7 +23,7 @@ test("server-renders the LUCY application shell", async () => {
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
-test("keeps Flutter contracts and proxy boundaries explicit", async () => {
+test("keeps web contracts and proxy boundaries explicit", async () => {
   const [page, proxy, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/backend/[service]/[...path]/route.ts", import.meta.url), "utf8"),
@@ -37,11 +37,16 @@ test("keeps Flutter contracts and proxy boundaries explicit", async () => {
   assert.match(page, /Learn · Unite · Connect · Yourself/);
   assert.match(page, /providerReference/);
   assert.match(page, /durationSeconds/);
+  assert.match(page, /audio\/webm;codecs=opus/);
+  assert.match(page, /playableAudioUrl/);
+  assert.match(page, /createMediaStreamSource\(remoteStream\)\.connect\(recordingDestinationRef\.current\)/);
+  assert.doesNotMatch(page, /s3:\/\/recordings/);
   assert.doesNotMatch(page, /event\.currentTarget\.reset\(\)/);
   assert.equal([...page.matchAll(/formElement\.reset\(\)/g)].length, 2);
   assert.match(proxy, /auth: process\.env\.AUTH_BASE_URL/);
   assert.match(proxy, /wallet: process\.env\.WALLET_BASE_URL/);
   assert.match(proxy, /AbortSignal\.timeout\(30_000\)/);
+  assert.match(proxy, /await upstream\.arrayBuffer\(\)/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
 });

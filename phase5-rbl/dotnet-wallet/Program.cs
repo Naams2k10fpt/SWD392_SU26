@@ -8,6 +8,7 @@ builder.Services.AddSwaggerGen();
 string connectionString = Environment.GetEnvironmentVariable("LUCY_DB")
     ?? builder.Configuration.GetConnectionString("MariaDb")
     ?? "Server=localhost;Database=lucy_phase5;User=root;Password=;AllowUserVariables=True;";
+connectionString = new MySqlConnectionStringBuilder(connectionString) { SslMode = MySqlSslMode.None, AllowPublicKeyRetrieval = true }.ConnectionString;
 
 var app = builder.Build();
 app.UseSwagger();
@@ -102,7 +103,7 @@ app.MapGet("/podcasts/recordings", async () =>
     return Results.Ok(await ListPodcastRecordings(connection));
 });
 
-app.Run("http://localhost:5040");
+app.Run(Environment.GetEnvironmentVariable("WALLET_URL") ?? "http://localhost:5041");
 
 static async Task<WalletAccount> GetOrCreateWallet(MySqlConnection connection, string ownerId, MySqlTransaction? transaction = null)
 {
