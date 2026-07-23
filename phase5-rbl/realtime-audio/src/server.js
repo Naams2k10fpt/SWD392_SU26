@@ -18,7 +18,9 @@ const app = express();
 const server = http.createServer(app);
 
 const RECORDINGS_DIR = path.resolve("recordings");
+const DOCUMENTS_DIR = path.resolve("documents");
 if (!existsSync(RECORDINGS_DIR)) mkdirSync(RECORDINGS_DIR, { recursive: true });
+if (!existsSync(DOCUMENTS_DIR)) mkdirSync(DOCUMENTS_DIR, { recursive: true });
 const AUDIO_EXTENSIONS = new Map([
   ["audio/webm", ".webm"],
   ["audio/mp4", ".m4a"],
@@ -33,6 +35,17 @@ const AUDIO_EXTENSIONS = new Map([
   ["audio/ogg", ".ogg"],
 ]);
 const audioExtension = mimeType => AUDIO_EXTENSIONS.get(mimeType.split(";", 1)[0].toLowerCase()) || null;
+const DOCUMENT_EXTENSIONS = new Map([
+  ["application/pdf", ".pdf"],
+  ["application/msword", ".doc"],
+  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx"],
+  ["application/vnd.ms-excel", ".xls"],
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx"],
+  ["application/vnd.ms-powerpoint", ".ppt"],
+  ["application/vnd.openxmlformats-officedocument.presentationml.presentation", ".pptx"],
+  ["text/plain", ".txt"],
+]);
+const documentExtension = mimeType => DOCUMENT_EXTENSIONS.get(String(mimeType).split(";", 1)[0].toLowerCase()) || null;
 const upload = multer({
   storage: multer.diskStorage({
     destination: RECORDINGS_DIR,
@@ -43,6 +56,17 @@ const upload = multer({
   }),
   fileFilter: (_request, file, callback) => callback(audioExtension(file.mimetype) ? null : Object.assign(new Error("Only WebM, M4A, WAV, MP3 or OGG audio is supported"), { status: 400 }), Boolean(audioExtension(file.mimetype))),
   limits: { fileSize: 50 * 1024 * 1024 },
+});
+const documentUpload = multer({
+  storage: multer.diskStorage({
+    destination: DOCUMENTS_DIR,
+    filename: (_request, file, callback) => {
+      const extension = documentExtension(file.mimetype);
+      callback(extension ? null : Object.assign(new Error("Unsupported document type"), { status: 400 }), extension ? `${randomUUID()}${extension}` : undefined);
+    },
+  }),
+  fileFilter: (_request, file, callback) => callback(documentExtension(file.mimetype) ? null : Object.assign(new Error("Only PDF, Word, Excel, PowerPoint or TXT documents are supported"), { status: 400 }), Boolean(documentExtension(file.mimetype))),
+  limits: { fileSize: 20 * 1024 * 1024 },
 });
 const io = new Server(server, {
   cors: {
@@ -55,6 +79,20 @@ app.use(cors());
 app.use(express.json());
 
 const socketParticipants = new Map();
+const DOCUMENT_MESSAGE_PREFIX = "__LUCY_DOCUMENT__:";
+const MAX_CHAT_MESSAGE_LENGTH = 500;
+
+function serializeChatMessage(row) {
+  const message = String(row.message || "");
+  const base = { id: row.id, userId: row.user_id, displayName: row.display_name, message, createdAt: row.created_at };
+  if (!message.startsWith(DOCUMENT_MESSAGE_PREFIX)) return base;
+  try {
+    const document = JSON.parse(message.slice(DOCUMENT_MESSAGE_PREFIX.length));
+    return { ...base, kind: "DOCUMENT", message: "", documentName: String(document.name), documentUrl: String(document.url), documentSize: Number(document.size) || 0 };
+  } catch {
+    return base;
+  }
+}
 
 async function recorderIdFromToken(authorization) {
   const token = String(authorization || "").replace(/^Bearer\s+/i, "");
@@ -249,8 +287,8 @@ app.get("/rooms/:roomCode/messages", async (request, response, next) => {
   try {
     const limit = Math.min(Number(request.query.limit) || 50, 200);
     const room = await ensureRoom(request.params.roomCode);
-    let sql = "SELECT id, user_id, display_name, message, created_at FROM room_messages WHERE room_id = ?";
-    const params = [room.id];
+    let sql = "SELECT id, user_id, display_name, message, created_at FROM room_messages WHERE room_id = ? AND LEFT(message, ?) <> ?";
+    const params = [room.id, DOCUMENT_MESSAGE_PREFIX.length, DOCUMENT_MESSAGE_PREFIX];
     if (request.query.before) {
       sql += " AND created_at < ?";
       params.push(request.query.before);
@@ -258,7 +296,7 @@ app.get("/rooms/:roomCode/messages", async (request, response, next) => {
     sql += " ORDER BY created_at DESC LIMIT ?";
     params.push(limit);
     const [rows] = await pool.execute(sql, params);
-    response.json({ messages: rows.reverse() });
+    response.json({ messages: rows.reverse().map(serializeChatMessage) });
   } catch (error) {
     next(error);
   }
@@ -272,6 +310,58 @@ app.get("/rooms/:roomCode/recordings", async (request, response, next) => {
       [room.id]
     );
     response.json({ recordings: rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/rooms/:roomCode/documents", documentUpload.single("document"), async (request, response, next) => {
+  let saved = false;
+  try {
+    const file = request.file;
+    const mentorId = await recorderIdFromToken(request.headers.authorization);
+    if (!file || !mentorId || mentorId !== request.body.userId) {
+      if (file) await unlink(file.path).catch(() => {});
+      response.status(403).json({ message: "Only PRO and SUPER users can share documents" });
+      return;
+    }
+    const room = await ensureRoom(request.params.roomCode);
+    const [participants] = await pool.execute(
+      "SELECT id, display_name FROM realtime_room_participants WHERE room_id = ? AND anonymous_uid = ? AND left_at IS NULL ORDER BY joined_at DESC LIMIT 1",
+      [room.id, mentorId]
+    );
+    if (!participants.length) {
+      await unlink(file.path).catch(() => {});
+      response.status(403).json({ message: "Join the room before sharing documents" });
+      return;
+    }
+    const id = randomUUID();
+    const documentName = file.originalname.replace(/^.*[\\/]/, "").slice(0, 180) || `document${path.extname(file.filename)}`;
+    const documentUrl = `/documents/${file.filename}`;
+    // ponytail: reuse the message column for one attachment type; add typed columns when chat gains more attachment kinds.
+    const message = DOCUMENT_MESSAGE_PREFIX + JSON.stringify({ name: documentName, url: documentUrl, size: file.size });
+    await pool.execute(
+      "INSERT INTO room_messages (id, room_id, participant_id, user_id, display_name, message) VALUES (?, ?, ?, ?, ?, ?)",
+      [id, room.id, participants[0].id, mentorId, participants[0].display_name, message]
+    );
+    saved = true;
+    const chatMessage = serializeChatMessage({ id, user_id: mentorId, display_name: participants[0].display_name, message, created_at: new Date() });
+    io.to(request.params.roomCode).emit("chat:message", chatMessage);
+    response.status(201).json(chatMessage);
+  } catch (error) {
+    if (!saved && request.file) await unlink(request.file.path).catch(() => {});
+    next(error);
+  }
+});
+
+app.get("/rooms/:roomCode/documents", async (request, response, next) => {
+  try {
+    const room = await ensureRoom(request.params.roomCode);
+    const [rows] = await pool.execute(
+      "SELECT id, user_id, display_name, message, created_at FROM room_messages WHERE room_id = ? AND LEFT(message, ?) = ? ORDER BY created_at DESC LIMIT 100",
+      [room.id, DOCUMENT_MESSAGE_PREFIX.length, DOCUMENT_MESSAGE_PREFIX]
+    );
+    response.json({ documents: rows.map(serializeChatMessage) });
   } catch (error) {
     next(error);
   }
@@ -334,6 +424,7 @@ app.post("/api/upload-recording", upload.single("audio"), async (request, respon
 });
 
 app.use("/recordings", express.static(RECORDINGS_DIR));
+app.use("/documents", express.static(DOCUMENTS_DIR));
 
 app.use((error, _request, response, _next) => {
   console.error("API Error:", error);
@@ -460,17 +551,18 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("chat:send", async ({ roomId, userId, displayName, message }, acknowledge) => {
+  socket.on("chat:send", async ({ roomId, message }, acknowledge) => {
     try {
       const participant = socketParticipants.get(socket.id);
-      if (!participant || participant.roomCode !== roomId || !message?.trim()) {
-        acknowledge?.({ ok: false, message: "Join the room and provide a message" });
+      const text = String(message || "").trim();
+      if (!participant || participant.roomCode !== roomId || !text || text.length > MAX_CHAT_MESSAGE_LENGTH || text.startsWith(DOCUMENT_MESSAGE_PREFIX)) {
+        acknowledge?.({ ok: false, message: `Tin nhắn phải có từ 1 đến ${MAX_CHAT_MESSAGE_LENGTH} ký tự` });
         return;
       }
       const room = await ensureRoom(roomId);
       await pool.execute(
         "INSERT INTO room_messages (room_id, participant_id, user_id, display_name, message) VALUES (?, ?, ?, ?, ?)",
-        [room.id, participant.participantId, userId, displayName, message.trim()]
+        [room.id, participant.participantId, participant.userId, participant.displayName, text]
       );
       const [rows] = await pool.execute(
         "SELECT id, user_id, display_name, message, created_at FROM room_messages WHERE room_id = ? ORDER BY created_at DESC LIMIT 1",
@@ -666,4 +758,4 @@ if (!process.env.LUCY_TEST) {
   });
 }
 
-export { app, audioExtension, parseRoomCode, recorderIdFromToken, server };
+export { app, audioExtension, documentExtension, parseRoomCode, recorderIdFromToken, serializeChatMessage, server };

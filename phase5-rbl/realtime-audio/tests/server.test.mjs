@@ -87,6 +87,23 @@ test("audioExtension: keeps audio-only file extensions", async () => {
   assert.equal(audioExtension("video/webm"), null);
 });
 
+test("document messages keep safe file types and survive chat history", async () => {
+  const { documentExtension, serializeChatMessage } = await import("../src/server.js");
+  assert.equal(documentExtension("application/pdf"), ".pdf");
+  assert.equal(documentExtension("application/vnd.openxmlformats-officedocument.wordprocessingml.document"), ".docx");
+  assert.equal(documentExtension("text/html"), null);
+  const message = serializeChatMessage({
+    id: "message-1",
+    user_id: "mentor-1",
+    display_name: "Mentor",
+    message: '__LUCY_DOCUMENT__:{"name":"lesson.pdf","url":"/documents/lesson.pdf","size":2048}',
+    created_at: "2026-07-23T00:00:00Z",
+  });
+  assert.equal(message.kind, "DOCUMENT");
+  assert.equal(message.documentName, "lesson.pdf");
+  assert.equal(message.documentSize, 2048);
+});
+
 test("recorderIdFromToken: accepts authenticated PRO and SUPER users", async () => {
   const { recorderIdFromToken } = await import("../src/server.js");
   const originalFetch = globalThis.fetch;

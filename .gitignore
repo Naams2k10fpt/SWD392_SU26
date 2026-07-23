@@ -22,3 +22,6 @@ local-env.ps1
 *.user
 .DS_Store
 Thumbs.db
+
+phase5-rbl/realtime-audio/recordings/
+phase5-rbl/realtime-audio/documents/
