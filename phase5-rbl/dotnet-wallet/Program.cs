@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using MySqlConnector;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -9,6 +10,8 @@ string connectionString = Environment.GetEnvironmentVariable("LUCY_DB")
     ?? builder.Configuration.GetConnectionString("MariaDb")
     ?? "Server=localhost;Database=lucy_phase5;User=root;Password=;AllowUserVariables=True;";
 connectionString = new MySqlConnectionStringBuilder(connectionString) { SslMode = MySqlSslMode.None, AllowPublicKeyRetrieval = true }.ConnectionString;
+string authBaseUrl = Environment.GetEnvironmentVariable("AUTH_BASE_URL") ?? "http://localhost:5000";
+using var authClient = new HttpClient { BaseAddress = new Uri($"{authBaseUrl.TrimEnd('/')}/") };
 
 var app = builder.Build();
 app.UseSwagger();
@@ -47,9 +50,16 @@ app.MapPost("/wallets/{userId}/top-up", async (string userId, TopUpRequest reque
     }
 });
 
-app.MapPost("/gifts", async (GiftRequest request) =>
+app.MapPost("/gifts", async (GiftRequest request, HttpRequest httpRequest) =>
 {
     if (request.Amount <= 0) return Results.BadRequest(new { message = "Gift amount must be positive" });
+    AuthenticatedUser? authenticatedUser = await Authenticate(authClient, httpRequest.Headers.Authorization.ToString());
+    if (authenticatedUser is null) return Results.Unauthorized();
+    if (!string.Equals(authenticatedUser.Role, "ANONYMOUS", StringComparison.OrdinalIgnoreCase)
+        || !string.Equals(authenticatedUser.Id, request.FromUserId, StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
 
     await using var connection = new MySqlConnection(connectionString);
     await connection.OpenAsync();
@@ -57,6 +67,11 @@ app.MapPost("/gifts", async (GiftRequest request) =>
 
     try
     {
+        if (!await CanGift(connection, transaction, request))
+        {
+            await transaction.RollbackAsync();
+            return Results.BadRequest(new { message = "Recipient must be a PRO or SUPER user in the same room" });
+        }
         WalletAccount sender = await GetOrCreateWallet(connection, request.FromUserId, transaction);
         WalletAccount receiver = await GetOrCreateWallet(connection, request.ToCreatorId, transaction);
         if (sender.Balance < request.Amount)
@@ -88,8 +103,16 @@ app.MapGet("/gifts", async () =>
     return Results.Ok(await ListGifts(connection));
 });
 
-app.MapPost("/podcasts/recordings", async (PodcastRecordingRequest request) =>
+app.MapPost("/podcasts/recordings", async (PodcastRecordingRequest request, HttpRequest httpRequest) =>
 {
+    AuthenticatedUser? authenticatedUser = await Authenticate(authClient, httpRequest.Headers.Authorization.ToString());
+    if (authenticatedUser is null) return Results.Unauthorized();
+    if (!CanManagePodcasts(authenticatedUser) || !string.Equals(authenticatedUser.Id, request.CreatorId, StringComparison.OrdinalIgnoreCase))
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Length > 255 || string.IsNullOrWhiteSpace(request.RoomId)
+        || string.IsNullOrWhiteSpace(request.StorageUri) || request.DurationSeconds < 1)
+        return Results.BadRequest(new { message = "Valid title, room, storage URI and duration are required" });
+
     await using var connection = new MySqlConnection(connectionString);
     await connection.OpenAsync();
     PodcastRecordingMetadata recording = await InsertPodcastRecording(connection, request);
@@ -101,6 +124,40 @@ app.MapGet("/podcasts/recordings", async () =>
     await using var connection = new MySqlConnection(connectionString);
     await connection.OpenAsync();
     return Results.Ok(await ListPodcastRecordings(connection));
+});
+
+app.MapPut("/podcasts/recordings/{id}", async (string id, PodcastUpdateRequest request, HttpRequest httpRequest) =>
+{
+    AuthenticatedUser? authenticatedUser = await Authenticate(authClient, httpRequest.Headers.Authorization.ToString());
+    if (authenticatedUser is null) return Results.Unauthorized();
+    if (!CanManagePodcasts(authenticatedUser)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    string title = request.Title?.Trim() ?? string.Empty;
+    if (title.Length is < 1 or > 255) return Results.BadRequest(new { message = "Title must contain 1 to 255 characters" });
+
+    await using var connection = new MySqlConnection(connectionString);
+    await connection.OpenAsync();
+    await using var command = connection.CreateCommand();
+    command.CommandText = "UPDATE podcast_recordings SET title = @title WHERE id = @id";
+    command.Parameters.AddWithValue("@title", title);
+    command.Parameters.AddWithValue("@id", id);
+    if (await command.ExecuteNonQueryAsync() == 0) return Results.NotFound(new { message = "Podcast not found" });
+    return Results.Ok(new { id, title });
+});
+
+app.MapDelete("/podcasts/recordings/{id}", async (string id, HttpRequest httpRequest) =>
+{
+    AuthenticatedUser? authenticatedUser = await Authenticate(authClient, httpRequest.Headers.Authorization.ToString());
+    if (authenticatedUser is null) return Results.Unauthorized();
+    if (!CanManagePodcasts(authenticatedUser)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+    await using var connection = new MySqlConnection(connectionString);
+    await connection.OpenAsync();
+    await using var command = connection.CreateCommand();
+    // ponytail: metadata-only delete; remove the storage object when one service owns file lifecycle.
+    command.CommandText = "DELETE FROM podcast_recordings WHERE id = @id";
+    command.Parameters.AddWithValue("@id", id);
+    if (await command.ExecuteNonQueryAsync() == 0) return Results.NotFound();
+    return Results.NoContent();
 });
 
 app.Run(Environment.GetEnvironmentVariable("WALLET_URL") ?? "http://localhost:5041");
@@ -117,6 +174,65 @@ static async Task<WalletAccount> GetOrCreateWallet(MySqlConnection connection, s
     await command.ExecuteNonQueryAsync();
 
     return await FindWallet(connection, ownerId, transaction) ?? throw new InvalidOperationException("Wallet insert failed");
+}
+
+static async Task<AuthenticatedUser?> Authenticate(HttpClient client, string authorization)
+{
+    if (string.IsNullOrWhiteSpace(authorization)) return null;
+    try
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "auth/me");
+        request.Headers.TryAddWithoutValidation("Authorization", authorization);
+        using HttpResponseMessage response = await client.SendAsync(request);
+        return response.IsSuccessStatusCode
+            ? await response.Content.ReadFromJsonAsync<AuthenticatedUser>()
+            : null;
+    }
+    catch (HttpRequestException)
+    {
+        return null;
+    }
+}
+
+static bool CanManagePodcasts(AuthenticatedUser user) => user.Role.Equals("PRO", StringComparison.OrdinalIgnoreCase)
+    || user.Role.Equals("SUPER", StringComparison.OrdinalIgnoreCase);
+
+static async Task<bool> CanGift(MySqlConnection connection, MySqlTransaction transaction, GiftRequest request)
+{
+    await using var command = connection.CreateCommand();
+    command.Transaction = transaction;
+    command.CommandText = """
+        SELECT EXISTS (
+            SELECT 1
+            FROM users recipient
+            JOIN user_roles ur ON ur.user_id = recipient.id
+            JOIN roles r ON r.id = ur.role_id
+            WHERE recipient.id = @recipientId
+              AND r.name IN ('PRO', 'SUPER')
+              AND (
+                @roomId = '' OR (
+                    EXISTS (
+                        SELECT 1 FROM realtime_room_participants sender_participant
+                        JOIN realtime_rooms sender_room ON sender_room.id = sender_participant.room_id
+                        WHERE sender_participant.anonymous_uid = @senderId
+                          AND sender_participant.left_at IS NULL
+                          AND sender_room.room_code = @roomId
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM realtime_room_participants recipient_participant
+                        JOIN realtime_rooms recipient_room ON recipient_room.id = recipient_participant.room_id
+                        WHERE recipient_participant.anonymous_uid = @recipientId
+                          AND recipient_participant.left_at IS NULL
+                          AND recipient_room.room_code = @roomId
+                    )
+                )
+              )
+        )
+        """;
+    command.Parameters.AddWithValue("@senderId", request.FromUserId);
+    command.Parameters.AddWithValue("@recipientId", request.ToCreatorId);
+    command.Parameters.AddWithValue("@roomId", request.RoomId?.Trim() ?? string.Empty);
+    return Convert.ToInt32(await command.ExecuteScalarAsync()) == 1;
 }
 
 static async Task<WalletAccount?> FindWallet(MySqlConnection connection, string ownerId, MySqlTransaction? transaction = null)
@@ -178,7 +294,7 @@ static async Task<GiftTransaction> InsertGift(MySqlConnection connection, MySqlT
     command.Parameters.AddWithValue("@amount", request.Amount);
     command.Parameters.AddWithValue("@message", request.Message ?? (object)DBNull.Value);
     await command.ExecuteNonQueryAsync();
-    return new GiftTransaction(id, request.FromUserId, request.ToCreatorId, request.RoomId ?? "", request.Amount, request.Message ?? "", DateTimeOffset.UtcNow);
+    return new GiftTransaction(id, request.FromUserId, request.ToCreatorId, request.FromUserId, request.ToCreatorId, request.RoomId ?? "", request.Amount, request.Message ?? "", DateTimeOffset.UtcNow);
 }
 
 static async Task<List<GiftTransaction>> ListGifts(MySqlConnection connection)
@@ -187,10 +303,14 @@ static async Task<List<GiftTransaction>> ListGifts(MySqlConnection connection)
     await using var command = connection.CreateCommand();
     command.CommandText = """
         SELECT g.id, sender.external_owner_id AS from_user_id, receiver.external_owner_id AS to_creator_id,
+               COALESCE(sender_user.display_name, sender.external_owner_id) AS from_display_name,
+               COALESCE(receiver_user.display_name, receiver.external_owner_id) AS to_display_name,
                g.room_code, g.amount, g.message, g.created_at
         FROM gift_transactions g
         JOIN wallet_accounts sender ON sender.id = g.from_wallet_id
         JOIN wallet_accounts receiver ON receiver.id = g.to_wallet_id
+        LEFT JOIN users sender_user ON sender_user.id = sender.external_owner_id
+        LEFT JOIN users receiver_user ON receiver_user.id = receiver.external_owner_id
         ORDER BY g.created_at DESC
         """;
     await using var reader = await command.ExecuteReaderAsync();
@@ -200,6 +320,8 @@ static async Task<List<GiftTransaction>> ListGifts(MySqlConnection connection)
             reader.GetGuid("id").ToString(),
             reader.GetString("from_user_id"),
             reader.GetString("to_creator_id"),
+            reader.GetString("from_display_name"),
+            reader.GetString("to_display_name"),
             reader.IsDBNull(reader.GetOrdinal("room_code")) ? string.Empty : reader.GetString("room_code"),
             reader.GetDecimal("amount"),
             reader.IsDBNull(reader.GetOrdinal("message")) ? string.Empty : reader.GetString("message"),
@@ -223,20 +345,27 @@ static async Task<PodcastRecordingMetadata> InsertPodcastRecording(MySqlConnecti
     command.Parameters.AddWithValue("@storageUri", request.StorageUri);
     command.Parameters.AddWithValue("@durationSeconds", request.DurationSeconds);
     await command.ExecuteNonQueryAsync();
-    return new PodcastRecordingMetadata(id, request.CreatorId, request.RoomId, request.Title, request.StorageUri, request.DurationSeconds, DateTimeOffset.UtcNow);
+    return new PodcastRecordingMetadata(id, request.CreatorId, request.CreatorId, request.RoomId, request.Title, request.StorageUri, request.DurationSeconds, DateTimeOffset.UtcNow);
 }
 
 static async Task<List<PodcastRecordingMetadata>> ListPodcastRecordings(MySqlConnection connection)
 {
     var recordings = new List<PodcastRecordingMetadata>();
     await using var command = connection.CreateCommand();
-    command.CommandText = "SELECT id, creator_external_id, room_code, title, storage_uri, duration_seconds, created_at FROM podcast_recordings ORDER BY created_at DESC";
+    command.CommandText = """
+        SELECT p.id, p.creator_external_id, COALESCE(u.display_name, p.creator_external_id) AS creator_display_name,
+               p.room_code, p.title, p.storage_uri, p.duration_seconds, p.created_at
+        FROM podcast_recordings p
+        LEFT JOIN users u ON u.id = p.creator_external_id
+        ORDER BY p.created_at DESC
+        """;
     await using var reader = await command.ExecuteReaderAsync();
     while (await reader.ReadAsync())
     {
         recordings.Add(new PodcastRecordingMetadata(
             reader.GetGuid("id").ToString(),
             reader.GetString("creator_external_id"),
+            reader.GetString("creator_display_name"),
             reader.GetString("room_code"),
             reader.GetString("title"),
             reader.GetString("storage_uri"),
@@ -250,6 +379,8 @@ record WalletAccount(string Id, string UserId, decimal Balance, string CurrencyC
 record TopUpRequest(decimal Amount, string ProviderReference);
 record WalletTransactionResponse(WalletAccount Wallet, string Message);
 record GiftRequest(string FromUserId, string ToCreatorId, string RoomId, decimal Amount, string Message);
-record GiftTransaction(string Id, string FromUserId, string ToCreatorId, string RoomId, decimal Amount, string Message, DateTimeOffset CreatedAt);
+record GiftTransaction(string Id, string FromUserId, string ToCreatorId, string FromDisplayName, string ToDisplayName, string RoomId, decimal Amount, string Message, DateTimeOffset CreatedAt);
+record AuthenticatedUser(string Id, string Email, string Role);
 record PodcastRecordingRequest(string CreatorId, string RoomId, string Title, string StorageUri, int DurationSeconds);
-record PodcastRecordingMetadata(string Id, string CreatorId, string RoomId, string Title, string StorageUri, int DurationSeconds, DateTimeOffset CreatedAt);
+record PodcastUpdateRequest(string Title);
+record PodcastRecordingMetadata(string Id, string CreatorId, string CreatorDisplayName, string RoomId, string Title, string StorageUri, int DurationSeconds, DateTimeOffset CreatedAt);
