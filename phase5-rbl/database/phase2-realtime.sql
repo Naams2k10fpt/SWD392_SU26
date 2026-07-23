@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS realtime_rooms (
     language_code VARCHAR(10) NOT NULL,
     level_number INT NOT NULL,
     agora_channel_name VARCHAR(120) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'OPEN',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

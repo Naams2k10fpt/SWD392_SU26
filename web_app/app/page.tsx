@@ -66,7 +66,7 @@ type RecordingState = {
   audioUrl?: string;
   error?: string;
 };
-type RoomInfo = { roomId: string; title: string; languageCode: string; levelNumber: number; participantCount?: number; status: string };
+type RoomInfo = { roomId: string; title: string; languageCode: string; levelNumber: number; participantCount?: number; status: string; hasPassword?: boolean };
 type Socket = {
   connected: boolean;
   on<T extends unknown[]>(event: string, callback: (...args: T) => void): Socket;
@@ -603,6 +603,7 @@ function CreateRoomDialog({ onClose, onCreated, session }: { onClose: () => void
   const [language, setLanguage] = useState("en");
   const [levelNumber, setLevelNumber] = useState(1);
   const [roomCode, setRoomCode] = useState("");
+  const [passwordEnabled, setPasswordEnabled] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
 
@@ -623,6 +624,7 @@ function CreateRoomDialog({ onClose, onCreated, session }: { onClose: () => void
     const form = new FormData(event.currentTarget);
     try {
       const roomCode = form.get("roomCode") as string;
+      const password = passwordEnabled ? String(form.get("roomPassword") || "") : "";
       await realtimeApi("/rooms", {
         method: "POST",
         body: JSON.stringify({
@@ -630,12 +632,13 @@ function CreateRoomDialog({ onClose, onCreated, session }: { onClose: () => void
           title: form.get("title") || `${LANGUAGES.find(l => l.code === language)?.name} Level ${levelNumber}`,
           languageCode: language,
           levelNumber,
+          password: password || null,
         }),
       });
       onClose();
       window.location.hash = "#/room";
       const jr = (window as any).__lucyJoinRoom;
-      if (jr) setTimeout(() => jr(roomCode), 100);
+      if (jr) setTimeout(() => jr(roomCode, password), 100);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Không thể tạo phòng");
     } finally {
@@ -667,6 +670,10 @@ function CreateRoomDialog({ onClose, onCreated, session }: { onClose: () => void
         <label>Tên phòng (không bắt buộc)
           <input name="title" placeholder={`${LANGUAGES.find(l => l.code === language)?.name} Level ${levelNumber}`} />
         </label>
+        <label className="checkbox-label"><input type="checkbox" checked={passwordEnabled} onChange={e => setPasswordEnabled(e.target.checked)} />Yêu cầu mật khẩu khi tham gia</label>
+        {passwordEnabled && <label>Mật khẩu phòng
+          <input name="roomPassword" type="password" minLength={4} maxLength={100} autoComplete="new-password" required />
+        </label>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="form-actions">
           <button type="button" className="secondary-button" onClick={onClose} disabled={creating}>← Hủy</button>
@@ -757,7 +764,7 @@ function RoomBrowser({ session, onJoin, connected, onCreateRoom }: { session: Se
                 <span className="room-icon">🎙️</span>
                 <div>
                   <strong>{r.title}</strong>
-                  <small>{r.roomId} · {r.participantCount || 0} người</small>
+                  <small>{r.roomId} · {r.participantCount || 0} người{r.hasPassword ? " · 🔒" : ""}</small>
                 </div>
                 <span className="join-badge">{connected ? "Tham gia →" : "..."}</span>
               </button>)}
@@ -795,6 +802,9 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
   const [giftError, setGiftError] = useState("");
   const [documentSending, setDocumentSending] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(true);
+  const [passwordRoomId, setPasswordRoomId] = useState("");
+  const [joinPassword, setJoinPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(() => new Set());
 
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -1339,7 +1349,7 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
     }
   }
 
-  function scheduleJoinRetry(code: string, reason: string) {
+  function scheduleJoinRetry(code: string, reason: string, password = "") {
     joiningRef.current = false;
     setJoining(false);
     setRetryRoomId(code);
@@ -1353,11 +1363,11 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
     if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
     retryTimerRef.current = window.setTimeout(() => {
       retryTimerRef.current = null;
-      joinRoom(code, true);
+      joinRoom(code, true, password);
     }, delay);
   }
 
-  function joinRoom(code: string, isRetry = false) {
+  function joinRoom(code: string, isRetry = false, password = "") {
     const target = code.trim();
     if (!target || joinedRef.current || joiningRef.current) return;
     if (!isRetry) retryCountRef.current = 0;
@@ -1366,7 +1376,7 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
     setRoomId(target);
     setRetryRoomId(target);
     const s = socketRef.current || socket;
-    if (!s?.connected) { scheduleJoinRetry(target, "Chưa kết nối được server"); return; }
+    if (!s?.connected) { scheduleJoinRetry(target, "Chưa kết nối được server", password); return; }
     joiningRef.current = true;
     setJoining(true);
     setError("");
@@ -1376,13 +1386,24 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
       if (joinRequestRef.current !== requestId || joinedRef.current) return;
       joinAckTimerRef.current = null;
       joinRequestRef.current += 1;
-      scheduleJoinRetry(target, "Server không phản hồi yêu cầu tham gia");
+      scheduleJoinRetry(target, "Server không phản hồi yêu cầu tham gia", password);
     }, JOIN_ACK_TIMEOUT_MS);
-    s.emit("room:join", { roomId: target, userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
+    s.emit("room:join", { roomId: target, userId: session.user.id, displayName: session.user.displayName, role: session.user.role, password }, async (result: { ok: boolean; room?: Room; message?: string; code?: string }) => {
       if (joinRequestRef.current !== requestId) return;
       if (joinAckTimerRef.current) window.clearTimeout(joinAckTimerRef.current);
       joinAckTimerRef.current = null;
-      if (!result?.ok) { scheduleJoinRetry(target, result?.message || "Không thể tham gia phòng"); return; }
+      if (!result?.ok) {
+        if (result?.code === "ROOM_PASSWORD_REQUIRED") {
+          joiningRef.current = false;
+          setJoining(false);
+          setError("");
+          setPasswordRoomId(target);
+          setPasswordError(result.message || "Phòng yêu cầu mật khẩu");
+          return;
+        }
+        scheduleJoinRetry(target, result?.message || "Không thể tham gia phòng", password);
+        return;
+      }
       joinedRef.current = true;
       joiningRef.current = false;
       retryCountRef.current = 0;
@@ -1392,6 +1413,9 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
       setJoined(true);
       setJoining(false);
       setRetryRoomId("");
+      setPasswordRoomId("");
+      setJoinPassword("");
+      setPasswordError("");
       setShowBrowser(false);
       if (result.room) setRoom(result.room);
       try {
@@ -1426,9 +1450,22 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
     joinRoom(target);
   }
 
+  function closePasswordDialog() {
+    setPasswordRoomId("");
+    setJoinPassword("");
+    setPasswordError("");
+  }
+
+  function submitRoomPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!passwordRoomId || !joinPassword) return;
+    setPasswordError("");
+    joinRoom(passwordRoomId, false, joinPassword);
+  }
+
   useEffect(() => {
-    (window as any).__lucyJoinRoom = (code: string) => {
-      if (socketRef.current?.connected) joinRoom(code);
+    (window as any).__lucyJoinRoom = (code: string, password = "") => {
+      if (socketRef.current?.connected) joinRoom(code, false, password);
     };
     return () => { delete (window as any).__lucyJoinRoom; };
   }, []);
@@ -1437,9 +1474,27 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
     if (joined && roomId) localStorage.setItem(ACTIVE_ROOM_KEY, roomId);
   }, [joined, roomId]);
 
+  const joinPasswordDialog = passwordRoomId ? <div className="modal-backdrop" onMouseDown={() => !joining && closePasswordDialog()}>
+    <section className="modal" role="dialog" aria-modal="true" aria-labelledby="join-password-title" onMouseDown={event => event.stopPropagation()}>
+      <span className="eyebrow">🔒 Phòng riêng tư</span>
+      <h2 id="join-password-title">Nhập mật khẩu phòng</h2>
+      <p className="muted">Phòng <strong>{passwordRoomId}</strong> yêu cầu mật khẩu để tham gia.</p>
+      <form className="form compact" onSubmit={submitRoomPassword}>
+        <label>Mật khẩu
+          <input type="password" value={joinPassword} onChange={event => setJoinPassword(event.target.value)} autoComplete="current-password" autoFocus required />
+        </label>
+        {passwordError && <p className="error" role="alert">{passwordError}</p>}
+        <div className="form-actions">
+          <button type="button" className="secondary-button" onClick={closePasswordDialog} disabled={joining}>Hủy</button>
+          <button className="primary-button" disabled={joining || !joinPassword}>{joining ? "Đang kiểm tra…" : "Vào phòng"}</button>
+        </div>
+      </form>
+    </section>
+  </div> : null;
+
   if (compact) {
-    if (!joined) return null;
-    return <aside className={`mini-room${recording.status === 'RECORDING' ? " recording" : ""}`} aria-label="Phòng học đang tham gia">
+    if (!joined) return joinPasswordDialog;
+    return <><aside className={`mini-room${recording.status === 'RECORDING' ? " recording" : ""}`} aria-label="Phòng học đang tham gia">
       <button className="mini-room-main" onClick={() => navigate("/room")}>
         <span className="mini-room-avatar">{session.user.displayName[0]?.toUpperCase() || "U"}</span>
         <span className="mini-room-info">
@@ -1453,11 +1508,11 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
         <button onClick={() => navigate("/room")} aria-label="Quay lại phòng">↗</button>
         <button className="leave" onClick={confirmLeaveRoom} aria-label="Thoát phòng">↪</button>
       </div>
-    </aside>;
+    </aside>{joinPasswordDialog}</>;
   }
 
   if (showBrowser) {
-    return <>{retryRoomId && <div className="room-retry-banner" role="status"><span>{joining ? `Đang tham gia lại phòng ${retryRoomId}…` : error || `Chưa thể vào phòng ${retryRoomId}`}</span><button onClick={retryJoinNow} disabled={joining}>Thử lại ngay</button></div>}<RoomBrowser session={session} onJoin={joinRoom} connected={connected} onCreateRoom={onCreateRoom} /></>;
+    return <>{retryRoomId && <div className="room-retry-banner" role="status"><span>{joining ? `Đang tham gia lại phòng ${retryRoomId}…` : error || `Chưa thể vào phòng ${retryRoomId}`}</span><button onClick={retryJoinNow} disabled={joining}>Thử lại ngay</button></div>}<RoomBrowser session={session} onJoin={joinRoom} connected={connected} onCreateRoom={onCreateRoom} />{joinPasswordDialog}</>;
   }
 
   return <div className="room-view">

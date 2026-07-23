@@ -104,6 +104,15 @@ test("document messages keep safe file types and survive chat history", async ()
   assert.equal(message.documentSize, 2048);
 });
 
+test("room passwords are hashed and verified", async () => {
+  const { hashRoomPassword, verifyRoomPassword } = await import("../src/server.js");
+  const hash = hashRoomPassword("room-secret");
+  assert.notEqual(hash, "room-secret");
+  assert.equal(verifyRoomPassword("room-secret", hash), true);
+  assert.equal(verifyRoomPassword("wrong", hash), false);
+  assert.equal(verifyRoomPassword("", null), true);
+});
+
 test("recorderIdFromToken: accepts authenticated PRO and SUPER users", async () => {
   const { recorderIdFromToken } = await import("../src/server.js");
   const originalFetch = globalThis.fetch;

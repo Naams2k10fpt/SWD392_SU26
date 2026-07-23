@@ -1,5 +1,5 @@
 import http from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { unlink } from "node:fs/promises";
@@ -81,6 +81,27 @@ app.use(express.json());
 const socketParticipants = new Map();
 const DOCUMENT_MESSAGE_PREFIX = "__LUCY_DOCUMENT__:";
 const MAX_CHAT_MESSAGE_LENGTH = 500;
+let roomPasswordSchemaPromise;
+
+function ensureRoomPasswordSchema() {
+  return roomPasswordSchemaPromise ??= pool.execute("ALTER TABLE realtime_rooms ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255) NULL");
+}
+
+function hashRoomPassword(password) {
+  const value = String(password || "");
+  if (!value) return null;
+  const salt = randomBytes(16).toString("hex");
+  return `${salt}:${scryptSync(value, salt, 64).toString("hex")}`;
+}
+
+function verifyRoomPassword(password, storedHash) {
+  if (!storedHash) return true;
+  if (String(password || "").length > 100) return false;
+  const [salt, expectedHex] = String(storedHash).split(":");
+  if (!salt || !/^[a-f0-9]{128}$/i.test(expectedHex || "")) return false;
+  const expected = Buffer.from(expectedHex, "hex");
+  return timingSafeEqual(scryptSync(String(password || ""), salt, expected.length), expected);
+}
 
 function serializeChatMessage(row) {
   const message = String(row.message || "");
@@ -124,8 +145,9 @@ function parseRoomCode(roomCode) {
 }
 
 async function ensureRoom(roomCode) {
+  await ensureRoomPasswordSchema();
   const [existing] = await pool.execute(
-    "SELECT id, room_code, title, language_code, level_number, agora_channel_name, status, created_at FROM realtime_rooms WHERE room_code = ?",
+    "SELECT id, room_code, title, language_code, level_number, agora_channel_name, status, password_hash, created_at FROM realtime_rooms WHERE room_code = ?",
     [roomCode]
   );
   if (existing.length > 0) {
@@ -146,7 +168,7 @@ async function ensureRoom(roomCode) {
   );
 
   const [created] = await pool.execute(
-    "SELECT id, room_code, title, language_code, level_number, agora_channel_name, status, created_at FROM realtime_rooms WHERE room_code = ?",
+    "SELECT id, room_code, title, language_code, level_number, agora_channel_name, status, password_hash, created_at FROM realtime_rooms WHERE room_code = ?",
     [roomCode]
   );
   return created[0];
@@ -169,6 +191,7 @@ async function serializeRoom(roomCode) {
     title: room.title,
     languageCode: room.language_code,
     levelNumber: room.level_number,
+    hasPassword: Boolean(room.password_hash),
     participantCount: participants.length,
     createdAt: room.created_at,
     users: participants.map(participant => ({
@@ -231,7 +254,7 @@ app.get("/rooms", async (request, response, next) => {
 
 app.post("/rooms", async (request, response, next) => {
   try {
-    const { roomCode, title, languageCode, levelNumber } = request.body;
+    const { roomCode, title, languageCode, levelNumber, password } = request.body;
     if (!roomCode || !languageCode || levelNumber === undefined) {
       response.status(400).json({ message: "roomCode, languageCode and levelNumber are required" });
       return;
@@ -244,7 +267,12 @@ app.post("/rooms", async (request, response, next) => {
       response.status(400).json({ message: "levelNumber must be a positive number" });
       return;
     }
+    if (password !== null && password !== undefined && password !== "" && (typeof password !== "string" || password.length < 4 || password.length > 100)) {
+      response.status(400).json({ message: "Mật khẩu phòng phải có từ 4 đến 100 ký tự" });
+      return;
+    }
 
+    await ensureRoomPasswordSchema();
     const [existing] = await pool.execute(
       "SELECT id FROM realtime_rooms WHERE room_code = ?", [roomCode]
     );
@@ -254,16 +282,17 @@ app.post("/rooms", async (request, response, next) => {
     }
 
     const displayTitle = title || `${languageCode.toUpperCase()} Level ${levelNumber}`;
+    const passwordHash = hashRoomPassword(password);
     await pool.execute(
-      "INSERT INTO realtime_rooms (room_code, title, language_code, level_number, agora_channel_name, status) VALUES (?, ?, ?, ?, ?, 'OPEN')",
-      [roomCode, displayTitle, languageCode, levelNumber, roomCode]
+      "INSERT INTO realtime_rooms (room_code, title, language_code, level_number, agora_channel_name, password_hash, status) VALUES (?, ?, ?, ?, ?, ?, 'OPEN')",
+      [roomCode, displayTitle, languageCode, levelNumber, roomCode, passwordHash]
     );
 
     const [created] = await pool.execute(
       "SELECT id, room_code, title, language_code, level_number, agora_channel_name, status, created_at FROM realtime_rooms WHERE room_code = ?",
       [roomCode]
     );
-    response.status(201).json(created[0]);
+    response.status(201).json({ ...created[0], hasPassword: Boolean(passwordHash) });
   } catch (error) {
     next(error);
   }
@@ -456,7 +485,7 @@ io.on("connection", (socket) => {
     }
   }
 
-  socket.on("room:join", async ({ roomId, userId, displayName, role = "anonymous" }, acknowledge) => {
+  socket.on("room:join", async ({ roomId, userId, displayName, role = "anonymous", password }, acknowledge) => {
     try {
       if (!roomId || !userId || !displayName) {
         acknowledge?.({ ok: false, message: "roomId, userId and displayName are required" });
@@ -464,6 +493,14 @@ io.on("connection", (socket) => {
       }
 
       const room = await ensureRoom(roomId);
+      if (room.password_hash && !password) {
+        acknowledge?.({ ok: false, code: "ROOM_PASSWORD_REQUIRED", message: "Phòng này yêu cầu mật khẩu" });
+        return;
+      }
+      if (!verifyRoomPassword(password, room.password_hash)) {
+        acknowledge?.({ ok: false, code: "ROOM_PASSWORD_REQUIRED", message: "Mật khẩu không đúng, vui lòng thử lại" });
+        return;
+      }
       await pool.execute(
         "INSERT INTO realtime_room_participants (room_id, anonymous_uid, display_name, role_name) VALUES (?, ?, ?, ?)",
         [room.id, userId, displayName, role.toUpperCase()]
@@ -758,4 +795,4 @@ if (!process.env.LUCY_TEST) {
   });
 }
 
-export { app, audioExtension, documentExtension, parseRoomCode, recorderIdFromToken, serializeChatMessage, server };
+export { app, audioExtension, documentExtension, hashRoomPassword, parseRoomCode, recorderIdFromToken, serializeChatMessage, server, verifyRoomPassword };
