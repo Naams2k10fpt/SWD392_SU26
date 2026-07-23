@@ -2,8 +2,8 @@
 
 | **Tên dự án** | LUCY (Language Unity & Collaborative Youth) |
 |---|---|
-| **Phiên bản** | 1.0.0 |
-| **Ngày tạo** | 2026-06-29 |
+| **Phiên bản** | 1.1.0 |
+| **Ngày cập nhật** | 2026-07-23 |
 | **Loại tài liệu** | Architecture |
 | **Công nghệ** | .NET 10, Node.js 22, Java 26, MariaDB 12, Flutter 3.27+ |
 
@@ -46,7 +46,7 @@ LUCY áp dụng **Microservices Architecture** với các đặc điểm sau:
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                         Client Layer                          │
-│     (curl / Postman / Swagger / Flutter / k6)                │
+│  (Web React/Vinext / Flutter / curl / Postman / Swagger / k6)│
 └──────┬──────────────┬──────────────┬──────────┬──────────────┘
        │              │              │          │
        ▼              ▼              ▼          ▼
@@ -100,7 +100,7 @@ Dùng cho real-time audio room:
 
 ```
 Client  ──Socket.IO events──▶  Realtime Service
-        ◀──Socket.IO emit────  (room:state, gift:alert)
+        ◀──Socket.IO emit────  (room:state, chat, recording, gift, WebRTC)
 ```
 
 ### MariaDB Transactions
@@ -118,14 +118,14 @@ Wallet Service ──BEGIN TRANSACTION──▶ MariaDB
 
 ### Cross-service Integration
 
-Khi gift được gửi, Wallet Service có thể broadcast sự kiện qua Realtime:
+Super Chat dùng flow commit trước, broadcast sau:
 
 ```
-Wallet Service ──HTTP POST /broadcast──▶ Realtime Service
-                                        └── Socket.IO emit gift:sent
+Web Client ──POST /gifts──▶ Wallet Service ──COMMIT──▶ MariaDB
+Web Client ──gift:announce──▶ Realtime Service ──gift:announced──▶ Room
 ```
 
-Tuy nhiên, ở Phase 4 implementation hiện tại, wallet service ghi nhận realtime_event trong DB và để client tự xử lý.
+Realtime Service kiểm tra gift đã tồn tại và đúng room trước khi broadcast.
 
 ---
 
@@ -153,7 +153,19 @@ Tuy nhiên, ở Phase 4 implementation hiện tại, wallet service ghi nhận r
 1. **Cô lập Identity**: Auth (.NET) là service duy nhất access DB user. Node.js Realtime không direct access DB user - nhận token từ client.
 2. **JWT signing key**: Sử dụng secret key đơn giản cho development (`phase1-development-secret-change-before-production`). Cần thay đổi trước production.
 3. **Password hashing**: Dùng ASP.NET Core Identity PasswordHasher (PBKDF2-based).
-4. **MariaDB credentials**: User `root`, password `1` (development only).
+4. **Room password**: Password phòng là tùy chọn, hash bằng Node `scrypt`; API chỉ
+   công khai cờ `hasPassword`.
+5. **Role authorization**: Ghi âm, upload tài liệu và CRUD podcast xác thực Bearer
+   JWT qua Auth Service; room join hiện vẫn nhận identity từ client.
+6. **MariaDB credentials**: Chỉ dùng tài khoản local trong development; không commit
+   credential thật.
+
+### Client room resilience
+
+Web client lưu room code đang tham gia trong `localStorage`. Chuyển tab giữ nguyên
+Socket.IO/WebRTC session; F5 hoặc mất kết nối sẽ thử join lại 3 lần với backoff
+1/2/4 giây. Password phòng không được lưu, vì vậy phòng khóa yêu cầu nhập lại qua
+modal sau reload.
 
 ### JWT Token Structure
 
@@ -255,7 +267,7 @@ Client ──POST /agora/token──▶ Realtime Service
 | **Phase 4** | + Wallet | Top-up, Gift, Podcast, Cross-service flow, SOA |
 | **Phase 5** | + Stress Test + Flutter | k6 stress, Cross testing, Mobile app |
 
-Database phát triển theo phase: `lucy_phase1` -> `lucy_phase2` -> ... -> `lucy_phase5` (22 tables).
+Database phát triển theo phase: `lucy_phase1` -> `lucy_phase2` -> ... -> `lucy_phase5` (24 tables).
 
 ---
 

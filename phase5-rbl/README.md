@@ -13,6 +13,7 @@ Folder này kế thừa Phase 1 + Phase 2 + Phase 3 + Phase 4 và bổ sung Phas
 - `final-evaluation/cross-testing-checklist.md`: checklist cross-testing giữa nhóm.
 - `final-evaluation/final-defense-guide.md`: hướng dẫn bảo vệ cuối kỳ.
 - `docs/FULL_RBL_FUNCTIONAL_FLOW.md`: tài liệu tiếng Việt mô tả full functional flow và cách kiểm chứng module.
+- `docs/room-chat-recording-feature.md`: contract hiện tại của phòng, chat, tài liệu, ghi âm và Super Chat.
 
 ## Chạy Phase 5
 
@@ -71,8 +72,14 @@ cd /home/amtia/Projects/swd/SUM/SWD392_SU26/web_app && npm run dev
 | Vào phòng | Phòng học → gõ `english-level-1` → Vào phòng |
 | Mic | Bật/tắt mic → WebRTC kết nối giữa 2 tab |
 | Ghi âm | ⏺ Ghi âm → nói → ⏹ Dừng → auto lưu + vào Podcast |
-| Tạo phòng | ＋ Tạo phòng → chọn ngôn ngữ, level → tự vào phòng |
-| Podcast | Tab Podcast → xem bản ghi đã auto tạo |
+| Tạo phòng | ＋ Tạo phòng → chọn ngôn ngữ, level, bật/tắt mật khẩu → tự vào phòng |
+| Phòng khóa | Mở bằng tài khoản khác → modal yêu cầu password; nhập sai phải bị từ chối |
+| F5/reconnect | Đang trong phòng → F5 → tự join lại; chỉ thoát khi xác nhận |
+| Chat | Gửi tối đa 500 ký tự; danh sách cuộn trong khung, không kéo dài trang |
+| Tài liệu | PRO/SUPER gửi file → file xuất hiện ở panel riêng bên phải; panel mặc định thu nhỏ |
+| Super Chat | Learner gửi quà cho PRO/SUPER đang ở cùng phòng |
+| Lịch sử quà | Đăng nhập bằng hai user → mỗi user chỉ thấy giao dịch mình gửi hoặc nhận |
+| Podcast | PRO/SUPER lọc, tạo, đổi tên/thay audio và xóa podcast |
 
 ### 6. Stress test (k6)
 ```bash

@@ -29,5 +29,18 @@ npm run build
 npm test
 ```
 
-Gift giữ nguyên contract Flutter, không gửi `roomId`. Backend hiện tại cần được
-cập nhật riêng để chấp nhận gift không có room trước khi flow này chạy end-to-end.
+## Chức năng hiện tại
+
+- Giữ người dùng trong phòng khi chuyển tab; F5/reconnect tự join lại với 3 lần retry.
+- Phòng có thể công khai hoặc dùng mật khẩu; mật khẩu được nhập trong modal và lỗi
+  sai mật khẩu hiển thị tại chỗ.
+- Chat giới hạn 500 ký tự, giữ tối đa 200 tin trên client và cuộn trong khung riêng.
+- Tài liệu phòng hiển thị ở panel bên phải, mặc định thu nhỏ; PRO/SUPER được upload.
+- PRO/SUPER được ghi âm và CRUD podcast, gồm thay file audio.
+- Avatar hiển thị trạng thái đang nói từ Web Audio analyser.
+- Learner gửi Super Chat cho PRO/SUPER đang ở cùng phòng.
+- Lịch sử quà chỉ hiển thị giao dịch user hiện tại đã gửi hoặc nhận.
+- Thoát phòng và trở về danh sách phòng đều có hộp xác nhận.
+
+Thay đổi frontend được dev server cập nhật qua HMR. Thay đổi trong
+`phase5-rbl/realtime-audio` cần restart service cổng 3020.

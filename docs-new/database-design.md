@@ -2,8 +2,8 @@
 
 | **Tên dự án** | LUCY (Language Unity & Collaborative Youth) |
 |---|---|
-| **Phiên bản** | 1.0.0 |
-| **Ngày tạo** | 2026-06-29 |
+| **Phiên bản** | 1.1.0 |
+| **Ngày cập nhật** | 2026-07-23 |
 | **Loại tài liệu** | Database Design |
 | **DBMS** | MariaDB 12.2 |
 | **Charset** | utf8mb4 + utf8mb4_unicode_ci |
@@ -31,7 +31,7 @@ Tất cả service dùng chung 1 MariaDB instance (localhost:3306) nhưng tách 
 | lucy_phase2 | 2 | 13 | Phase 1 + Realtime (realtime_rooms, participants, latency) |
 | lucy_phase3 | 3 | 16 | Phase 2 + LMS (mentor_material_pins, learner_progress, transitions) |
 | lucy_phase4 | 4 | 20 | Phase 3 + Monetization (wallet_accounts, transactions, gifts, podcasts) |
-| lucy_phase5 | 5 | 22 | Phase 4 + Stress Test (stress_test_runs, cross_testing_reports) |
+| lucy_phase5 | 5 | 24 | Phase 4 + Stress Test + room chat/recording logs |
 
 **Migration**: Import thủ qua `database/import-all.sql`, script này chạy tuần tự:
 ```
@@ -42,7 +42,8 @@ import-all.sql
 ├── phase2-realtime.sql      # Realtime tables
 ├── phase3-lms.sql           # LMS tables
 ├── phase4-monetization.sql  # Monetization tables
-└── phase5-stress-evaluation.sql  # Stress test tables
+├── phase5-stress-evaluation.sql  # Stress test tables
+└── phase5-realtime-chat-record.sql # Chat và recording logs
 ```
 
 ---
@@ -95,9 +96,11 @@ CREATE TABLE levels (
 
 | Table | Columns | Ghi chú |
 |---|---|---|
-| **realtime_rooms** | id (CHAR 36 PK), room_code (VARCHAR 80 UNIQUE), title (VARCHAR 255), language_code (VARCHAR 10), level_number (INT), agora_channel_name (VARCHAR 120 UNIQUE), status (VARCHAR 32), created_at (TIMESTAMP) | Status: OPEN, CLOSED, FULL |
+| **realtime_rooms** | id (CHAR 36 PK), room_code (VARCHAR 80 UNIQUE), title (VARCHAR 255), language_code (VARCHAR 10), level_number (INT), agora_channel_name (VARCHAR 120 UNIQUE), password_hash (VARCHAR 255 NULL), status (VARCHAR 32), created_at (TIMESTAMP) | `password_hash` là `scrypt` hash; NULL là phòng công khai |
 | **realtime_room_participants** | id (CHAR 36 PK), room_id (CHAR 36 FK), user_id (CHAR 36 FK NULL), anonymous_uid (VARCHAR 120), display_name (VARCHAR 120), role_name (VARCHAR 32), mic_enabled (BOOLEAN), hand_raised (BOOLEAN), joined_at (TIMESTAMP), left_at (TIMESTAMP NULL) | left_at NULL = đang trong phòng |
 | **realtime_latency_samples** | id (CHAR 36 PK), room_id (CHAR 36 FK), participant_id (CHAR 36 FK NULL), round_trip_ms (INT), sampled_at (TIMESTAMP) | Đo độ trễ round-trip |
+| **room_messages** | id, room_id, participant_id, user_id, display_name, message, created_at | Chat và metadata tài liệu; API tách thành hai luồng |
+| **recording_logs** | id, room_id, started_by, status, storage_uri, duration_seconds, started_at, stopped_at | Theo dõi phiên ghi âm |
 
 ```sql
 CREATE TABLE realtime_rooms (
@@ -107,6 +110,7 @@ CREATE TABLE realtime_rooms (
     language_code VARCHAR(10) NOT NULL,
     level_number INT NOT NULL,
     agora_channel_name VARCHAR(120) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'OPEN',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -150,8 +154,8 @@ CREATE TABLE learner_progress (
 |---|---|---|
 | **wallet_accounts** | id (CHAR 36 PK), user_id (CHAR 36 FK NULL), external_owner_id (VARCHAR 120 UNIQUE), balance (DECIMAL 18,2), currency_code (VARCHAR 10), updated_at (TIMESTAMP) | Mỗi user có 1 wallet, currency mặc định VND |
 | **wallet_transactions** | id (CHAR 36 PK), wallet_id (CHAR 36 FK), transaction_type (VARCHAR 40), amount (DECIMAL 18,2), provider_reference (VARCHAR 120), status (VARCHAR 32), created_at (TIMESTAMP) | Type: TOP_UP, GIFT_SENT, GIFT_RECEIVED |
-| **gift_transactions** | id (CHAR 36 PK), from_wallet_id (CHAR 36 FK), to_wallet_id (CHAR 36 FK), room_code (VARCHAR 80), amount (DECIMAL 18,2), message (VARCHAR 255), realtime_event (VARCHAR 80), created_at (TIMESTAMP) | realtime_event: gift:sent |
-| **podcast_recordings** | id (CHAR 36 PK), creator_user_id (CHAR 36 FK NULL), creator_external_id (VARCHAR 120), room_code (VARCHAR 80), title (VARCHAR 255), storage_uri (VARCHAR 500), duration_seconds (INT), created_at (TIMESTAMP) | Creators (Super role) record podcast |
+| **gift_transactions** | id (CHAR 36 PK), from_wallet_id (CHAR 36 FK), to_wallet_id (CHAR 36 FK), room_code (VARCHAR 80), amount (DECIMAL 18,2), message (VARCHAR 255), realtime_event (VARCHAR 80), created_at (TIMESTAMP) | realtime_event: gift:sent; lịch sử API chỉ trả giao dịch user hiện tại gửi/nhận |
+| **podcast_recordings** | id (CHAR 36 PK), creator_user_id (CHAR 36 FK NULL), creator_external_id (VARCHAR 120), room_code (VARCHAR 80), title (VARCHAR 255), storage_uri (VARCHAR 500), duration_seconds (INT), created_at (TIMESTAMP) | PRO/SUPER quản lý podcast |
 
 ```sql
 CREATE TABLE wallet_accounts (
@@ -193,6 +197,8 @@ languages 1───* stages 1───* levels 1───* lessons 1───* 
 ```
 realtime_rooms 1───* realtime_room_participants
 realtime_rooms 1───* realtime_latency_samples
+realtime_rooms 1───* room_messages
+realtime_rooms 1───* recording_logs
 ```
 
 ### LMS Domain
@@ -253,6 +259,7 @@ Các script migration nằm trong `database/` của mỗi phase:
 | `phase3-lms.sql` | 3 | LMS tables (3 tables + seed data) |
 | `phase4-monetization.sql` | 4 | Monetization tables (4 tables + seed wallets) |
 | `phase5-stress-evaluation.sql` | 5 | Stress test tables (2 tables + seed run) |
+| `phase5-realtime-chat-record.sql` | 5 | Chat và recording logs (2 tables) |
 | `import-all.sql` | 5 | Import tất cả (chạy tuần tự các script trên) |
 
 ### Cách import
@@ -277,8 +284,8 @@ mariadb -u root -p1 lucy_phase4 < database/phase4-monetization.sql
 | Name | Description |
 |---|---|
 | Anonymous | Người dùng ẩn danh, vào phòng Level 1-5 |
-| Pro | Mentor, dashboard learner, material pins |
-| Super | Creator, record podcast, nhận gift |
+| Pro | Mentor, dashboard learner, gửi tài liệu, quản lý podcast, nhận gift |
+| Super | Creator, gửi tài liệu, quản lý podcast, nhận gift |
 
 ### Languages
 

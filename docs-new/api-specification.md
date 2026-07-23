@@ -2,8 +2,8 @@
 
 | **Tên dự án** | LUCY (Language Unity & Collaborative Youth) |
 |---|---|
-| **Phiên bản** | 1.0.0 |
-| **Ngày tạo** | 2026-06-29 |
+| **Phiên bản** | 1.1.0 |
+| **Ngày cập nhật** | 2026-07-23 |
 | **Loại tài liệu** | API Specification |
 | **Base URLs** | Auth: http://localhost:5000, Wallet: http://localhost:5040, Realtime: http://localhost:3020 |
 
@@ -168,10 +168,12 @@ Swagger UI: `http://localhost:5040/swagger`
 | GET | /health | No | — | `{service, status, storage}` | Health check |
 | GET | /wallets/{userId} | No | — | `{id, userId, balance, currencyCode}` | Xem thông tin ví (tự động tạo nếu chưa có) |
 | POST | /wallets/{userId}/top-up | No | `{amount, providerReference}` | `{wallet, message}` | Nạp tiền vào ví (transaction) |
-| POST | /gifts | No | `{fromUserId, toCreatorId, amount, message}` | `{transaction, realtimeEvent, syncRisk}` | Gửi quà tặng (transaction) |
-| GET | /gifts | No | — | `[{id, fromUserId, toCreatorId, ...}]` | Danh sách quà tặng |
-| POST | /podcasts/recordings | No | `{creatorId, roomId, title, storageUri, durationSeconds}` | 201 `{id, ...}` | Tạo podcast recording |
+| POST | /gifts | Bearer JWT | `{fromUserId, toCreatorId, amount, message, roomId}` | `{transaction, realtimeEvent}` | Super Chat tới PRO/SUPER cùng phòng |
+| GET | /gifts | Bearer JWT | — | `[{id, fromUserId, toCreatorId, ...}]` | Quà user hiện tại đã gửi hoặc nhận |
+| POST | /podcasts/recordings | Bearer JWT | `{creatorId, roomId, title, storageUri, durationSeconds}` | 201 `{id, ...}` | PRO/SUPER tạo podcast |
 | GET | /podcasts/recordings | No | — | `[{id, title, ...}]` | Danh sách recordings |
+| PUT | /podcasts/recordings/{id} | Bearer JWT | `{title}` | 200 `{id, title}` | PRO/SUPER đổi tên podcast |
+| DELETE | /podcasts/recordings/{id} | Bearer JWT | — | 204 | PRO/SUPER xóa podcast |
 
 ### Chi tiết Endpoint
 
@@ -249,16 +251,18 @@ Error:
 ```
 POST http://localhost:5040/gifts
 Content-Type: application/json
+Authorization: Bearer <jwt>
 
 {
   "fromUserId": "learner-1",
   "toCreatorId": "creator-1",
+  "roomId": "trial-level-1",
   "amount": 50000,
   "message": "Cam on bai hoc hay!"
 }
 ```
 
-Response (200):
+Response (201):
 
 ```json
 {
@@ -270,7 +274,7 @@ Response (200):
     "message": "Cam on bai hoc hay!"
   },
   "realtimeEvent": "gift:sent",
-  "syncRisk": "realtime broadcast is async — client must poll or listen"
+  "syncRisk": "Broadcast over Node Socket.IO after wallet commit"
 }
 ```
 
@@ -286,7 +290,10 @@ Error:
 
 ```
 GET http://localhost:5040/gifts
+Authorization: Bearer <jwt>
 ```
+
+Chỉ trả các giao dịch mà user trong JWT là người gửi hoặc người nhận.
 
 Response (200):
 
@@ -367,7 +374,14 @@ Base URL: `http://localhost:3020`
 | Method | Endpoint | Request | Response | Mô tả |
 |---|---|---|---|---|
 | GET | /health | — | `{service, status, storage}` | Health check |
-| GET | /rooms | — | `{rooms: [{roomId, users, raisedHands}]}` | Danh sách phòng đang active |
+| GET | /rooms | `language?`, `level?` | `{rooms: [{roomId, hasPassword, users, raisedHands}]}` | Danh sách phòng đang có người |
+| POST | /rooms | `{roomCode, title?, languageCode, levelNumber, password?}` | 201 room | Tạo phòng công khai hoặc có password |
+| GET | /rooms/levels | — | `{groups}` | Nhóm phòng theo ngôn ngữ và level |
+| GET | /rooms/:roomCode/messages | `limit?`, `before?` | `{messages}` | Lịch sử chat, tối đa 200 |
+| GET | /rooms/:roomCode/documents | — | `{documents}` | 100 tài liệu mới nhất |
+| POST | /api/rooms/:roomCode/documents | Bearer + multipart `document` | 201 document | PRO/SUPER gửi tài liệu tối đa 20 MB |
+| GET | /rooms/:roomCode/recordings | — | `{recordings}` | Bản ghi của phòng |
+| POST | /api/upload-recording | Bearer + multipart `audio` | 201 podcast | PRO/SUPER upload audio tối đa 50 MB |
 | POST | /agora/token | `{channelName, uid, role}` | `{channelName, uid, role, token, note}` | Sinh Agora token (scaffold) |
 
 ### Chi tiết REST Endpoint
@@ -401,6 +415,7 @@ Response (200):
   "rooms": [
     {
       "roomId": "trial-level-1",
+      "hasPassword": true,
       "createdAt": "2026-06-29T10:00:00Z",
       "users": [
         {
@@ -449,18 +464,25 @@ Response (200):
 
 | Event | Payload | Mô tả |
 |---|---|---|
-| `room:join` | `{roomId, userId, displayName, role}` | Join phòng audio |
-| `room:leave` | `{roomId, userId}` | Rời phòng audio |
+| `room:join` | `{roomId, userId, displayName, role, password?}` | Join; sai password trả `ROOM_PASSWORD_REQUIRED` |
+| `room:leave` | `{roomId}` | Rời phòng audio |
 | `hand:raise` | `{roomId, raised: bool}` | Giơ tay / hạ tay |
 | `mic:toggle` | `{roomId, enabled: bool}` | Bật / tắt mic |
 | `latency:ping` | `{clientSentAt: timestamp}` | Đo độ trễ client -> server |
+| `chat:send` | `{roomId, message}` | Gửi tin nhắn 1-500 ký tự |
+| `recording:start` | `{roomId, token}` | Bắt đầu ghi, chỉ PRO/SUPER |
+| `recording:stop` | `{roomId, token}` | Dừng ghi, chỉ PRO/SUPER |
+| `gift:announce` | `{roomId, giftId}` | Broadcast Super Chat đã commit |
+| `webrtc:offer/answer/ice-candidate` | WebRTC payload | Thiết lập audio peer-to-peer |
 
 #### Server to Client
 
 | Event | Payload | Mô tả |
 |---|---|---|
 | `room:state` | `{roomId, users: [...], raisedHands: [...]}` | Cập nhật trạng thái phòng |
-| `gift:alert` | `{from, amount, message}` | Thông báo có gift mới |
+| `chat:message` | Chat hoặc document payload | Tin nhắn/tài liệu mới |
+| `recording:update` | Recording state | Trạng thái và thời gian ghi |
+| `gift:announced` | Super Chat payload | Thông báo quà trong phòng |
 | `latency:pong` | `{clientSentAt, serverReceivedAt}` | Phản hồi đo độ trễ |
 
 #### Event Flow Example
@@ -558,6 +580,8 @@ anon-level-4-demo (Anonymous Level 4)
 | POST /auth/register | password | Required, non-empty |
 | POST /auth/register | displayName | Required, non-empty |
 | POST /wallets/{userId}/top-up | amount | Must be positive (> 0) |
+| POST /rooms | password | Bỏ trống hoặc dài 4-100 ký tự; lưu dạng `scrypt` hash |
+| Socket `chat:send` | message | Sau trim phải dài 1-500 ký tự |
 | POST /gifts | amount | Must be positive (<= balance) |
 | POST /agora/token | channelName | Required |
 | POST /agora/token | uid | Required |

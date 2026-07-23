@@ -65,11 +65,18 @@ Luồng real-time room:
 1. Mobile/web client lấy identity từ .NET auth hoặc anonymous token scaffold.
 2. Client gọi `POST /agora/token` với `channelName` và `uid` để nhận token scaffold.
 3. Client kết nối Socket.IO tới Node service.
-4. Client gửi `room:join` với `roomId`, `userId`, `displayName`, `role`.
-5. Server lưu room/participant vào MariaDB và broadcast `room:state` cho mọi client trong phòng.
-6. Client gửi `hand:raise` để bật/tắt trạng thái giơ tay.
-7. Client gửi `mic:toggle` để bật/tắt trạng thái mic ở room state.
+4. Mentor/Creator có thể tạo phòng công khai hoặc đặt password. Password dài 4-100
+   ký tự, được hash bằng `scrypt`; API danh sách chỉ trả `hasPassword`.
+5. Client gửi `room:join` với `roomId`, `userId`, `displayName`, `role` và
+   `password?`. Phòng khóa từ chối join trước khi tạo participant nếu password sai.
+6. Server lưu room/participant vào MariaDB và broadcast `room:state` cho mọi client trong phòng.
+7. Client gửi `hand:raise` và `mic:toggle`; Web Audio analyser đánh dấu avatar
+   người đang nói.
 8. Client gửi `latency:ping` để nhận `serverReceivedAt`; client tự tính round-trip latency.
+9. Client lưu mã phòng đang tham gia để F5/reconnect tự join lại tối đa 3 lần.
+   Chuyển tab không rời phòng; chỉ thao tác thoát đã xác nhận mới xóa trạng thái.
+10. Chat giới hạn 500 ký tự và 200 tin gần nhất trên client. Tài liệu được tách
+    sang panel riêng, mặc định thu nhỏ; PRO/SUPER được upload file tối đa 20 MB.
 
 Ranh giới MVP: endpoint Agora hiện chỉ trả placeholder token để mô tả kiến trúc. Production phải dùng Agora AccessToken2/RtcTokenBuilder, credential server-side, JWT middleware, và kiểm tra quyền vào channel.
 
@@ -116,20 +123,23 @@ Luồng wallet/top-up:
 3. Wallet API cộng balance trong MariaDB và ghi ledger vào `wallet_transactions`.
 4. Production phải thay bằng payment provider callback đã verify chữ ký, idempotency key, database transaction.
 
-Luồng real-time gift:
+Luồng Super Chat trong phòng:
 
-1. Learner/Pro gửi gift bằng `POST /gifts` gồm sender, creator, room, amount, message.
-2. Wallet API kiểm tra balance sender.
-3. API trừ balance sender và cộng balance creator.
-4. API trả `realtimeEvent = gift:sent` để Node Socket.IO broadcast sau commit.
-5. Defense cần nêu rủi ro sync: nếu broadcast trước commit hoặc retry không idempotent, UI có thể hiển thị gift sai.
+1. Learner chọn PRO/SUPER đang ở cùng phòng và gửi gift bằng `POST /gifts`.
+2. Wallet API xác thực Bearer token, kiểm tra người nhận cùng phòng và balance sender.
+3. API trừ balance sender, cộng balance người nhận và commit transaction.
+4. Client emit `gift:announce`; Node kiểm tra giao dịch rồi broadcast
+   `gift:announced` sau commit.
+5. `GET /gifts` yêu cầu Bearer token và chỉ trả giao dịch user hiện tại đã gửi
+   hoặc nhận; lịch sử hiển thị display name thay cho UUID khi có thông tin user.
 
-Luồng podcast recording:
+Luồng podcast:
 
-1. Super/Creator host room/podcast.
-2. Sau khi recording hoàn tất, client/service gọi `POST /podcasts/recordings` với creator, room, title, storageUri, duration.
-3. API lưu metadata scaffold để UI listing hoặc moderation dùng sau.
-4. Production cần object storage thật, permission check, lifecycle policy và audit log.
+1. PRO/SUPER ghi âm trong phòng; UI hiển thị thời gian đang ghi.
+2. Audio được upload vào Realtime service, sau đó metadata podcast được lưu.
+3. PRO/SUPER có thể lọc, tạo, đổi tên, thay audio và xóa podcast.
+4. Audio hỗ trợ WebM, M4A, WAV, MP3, OGG, tối đa 50 MB.
+5. Production cần object storage thật, lifecycle policy và audit log.
 
 Cách kiểm tra Phase 4:
 
