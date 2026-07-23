@@ -16,7 +16,7 @@ export const options = {
 
 const authBaseUrl = __ENV.AUTH_BASE_URL || 'http://localhost:5000';
 const realtimeBaseUrl = __ENV.REALTIME_BASE_URL || 'http://localhost:3020';
-const walletBaseUrl = __ENV.WALLET_BASE_URL || 'http://localhost:5040';
+const walletBaseUrl = __ENV.WALLET_BASE_URL || 'http://localhost:5041';
 
 export default function () {
   const suffix = `${__VU}-${__ITER}`;

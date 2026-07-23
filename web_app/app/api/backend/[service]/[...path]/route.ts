@@ -1,6 +1,6 @@
 const services = {
   auth: process.env.AUTH_BASE_URL || "http://localhost:5000",
-  wallet: process.env.WALLET_BASE_URL || "http://localhost:5040",
+  wallet: process.env.WALLET_BASE_URL || "http://localhost:5041",
 } as const;
 
 type Context = { params: Promise<{ service: string; path: string[] }> };
