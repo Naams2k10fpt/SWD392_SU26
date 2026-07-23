@@ -82,7 +82,29 @@ test("audioExtension: keeps audio-only file extensions", async () => {
   const { audioExtension } = await import("../src/server.js");
   assert.equal(audioExtension("audio/webm;codecs=opus"), ".webm");
   assert.equal(audioExtension("audio/mp4"), ".m4a");
+  assert.equal(audioExtension("audio/x-m4a"), ".m4a");
+  assert.equal(audioExtension("audio/vnd.wave"), ".wav");
   assert.equal(audioExtension("video/webm"), null);
+});
+
+test("recorderIdFromToken: accepts authenticated PRO and SUPER users", async () => {
+  const { recorderIdFromToken } = await import("../src/server.js");
+  const originalFetch = globalThis.fetch;
+  let role = "PRO";
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options.headers.Authorization, "Bearer test-token");
+    return Response.json({ id: "mentor-1", role });
+  };
+  try {
+    assert.equal(await recorderIdFromToken("Bearer test-token"), "mentor-1");
+    role = "SUPER";
+    assert.equal(await recorderIdFromToken("test-token"), "mentor-1");
+    role = "ANONYMOUS";
+    assert.equal(await recorderIdFromToken("test-token"), null);
+    assert.equal(await recorderIdFromToken(""), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("POST /rooms: validates required fields", { skip: "Requires running MariaDB" }, async () => {

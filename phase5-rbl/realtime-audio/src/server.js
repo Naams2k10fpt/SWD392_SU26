@@ -11,6 +11,7 @@ import { Server } from "socket.io";
 
 const port = Number(process.env.PORT || 3020);
 const databaseUrl = process.env.LUCY_DB_URL || "mysql://@localhost:3306/test_lucy_phase5";
+const authBaseUrl = process.env.AUTH_BASE_URL || "http://localhost:5000";
 const pool = mysql.createPool(databaseUrl);
 
 const app = express();
@@ -21,9 +22,14 @@ if (!existsSync(RECORDINGS_DIR)) mkdirSync(RECORDINGS_DIR, { recursive: true });
 const AUDIO_EXTENSIONS = new Map([
   ["audio/webm", ".webm"],
   ["audio/mp4", ".m4a"],
+  ["audio/m4a", ".m4a"],
+  ["audio/x-m4a", ".m4a"],
   ["audio/wav", ".wav"],
   ["audio/x-wav", ".wav"],
+  ["audio/wave", ".wav"],
+  ["audio/vnd.wave", ".wav"],
   ["audio/mpeg", ".mp3"],
+  ["audio/mp3", ".mp3"],
   ["audio/ogg", ".ogg"],
 ]);
 const audioExtension = mimeType => AUDIO_EXTENSIONS.get(mimeType.split(";", 1)[0].toLowerCase()) || null;
@@ -49,6 +55,19 @@ app.use(cors());
 app.use(express.json());
 
 const socketParticipants = new Map();
+
+async function recorderIdFromToken(authorization) {
+  const token = String(authorization || "").replace(/^Bearer\s+/i, "");
+  if (!token) return null;
+  try {
+    const response = await fetch(`${authBaseUrl}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) return null;
+    const user = await response.json();
+    return ["PRO", "SUPER"].includes(user.role?.toUpperCase()) ? user.id : null;
+  } catch {
+    return null;
+  }
+}
 
 function parseRoomCode(roomCode) {
   // Try to extract language and level from room code patterns like:
@@ -262,26 +281,51 @@ app.post("/api/upload-recording", upload.single("audio"), async (request, respon
   let podcastSaved = false;
   try {
     const { roomCode, userId } = request.body;
+    const podcastId = String(request.body.podcastId || "").trim();
+    const requestedTitle = String(request.body.title || "").trim();
     const file = request.file;
     const durationSeconds = Math.round(Number(request.body.durationSeconds));
-    if (!roomCode || !file || !Number.isFinite(durationSeconds) || durationSeconds < 1) {
+    if (!roomCode || !file || !Number.isFinite(durationSeconds) || durationSeconds < 1 || requestedTitle.length > 255 || (podcastId && !requestedTitle)) {
       if (file) await unlink(file.path).catch(() => {});
-      response.status(400).json({ message: "roomCode, audio file and positive durationSeconds are required" });
+      response.status(400).json({ message: "Valid room, title, audio file and duration are required" });
+      return;
+    }
+    const recorderId = await recorderIdFromToken(request.headers.authorization);
+    if (!recorderId || recorderId !== userId) {
+      await unlink(file.path).catch(() => {});
+      response.status(403).json({ message: "Only PRO and SUPER users can upload recordings" });
       return;
     }
     const storageUri = `/recordings/${file.filename}`;
     const room = await ensureRoom(roomCode);
-    await pool.execute(
-      "INSERT INTO podcast_recordings (creator_external_id, room_code, title, storage_uri, duration_seconds) VALUES (?, ?, ?, ?, ?)",
-      [userId || "anonymous", roomCode, `Recording - ${room.title || roomCode}`, storageUri, durationSeconds]
-    );
+    if (podcastId) {
+      const [existing] = await pool.execute("SELECT storage_uri FROM podcast_recordings WHERE id = ?", [podcastId]);
+      if (!existing.length) {
+        await unlink(file.path).catch(() => {});
+        response.status(404).json({ message: "Podcast not found" });
+        return;
+      }
+      await pool.execute(
+        "UPDATE podcast_recordings SET title = ?, storage_uri = ?, duration_seconds = ? WHERE id = ?",
+        [requestedTitle, storageUri, durationSeconds, podcastId]
+      );
+      const oldStorageUri = existing[0].storage_uri;
+      if (oldStorageUri?.startsWith("/recordings/")) await unlink(path.join(RECORDINGS_DIR, path.basename(oldStorageUri))).catch(() => {});
+    } else {
+      await pool.execute(
+        "INSERT INTO podcast_recordings (creator_external_id, room_code, title, storage_uri, duration_seconds) VALUES (?, ?, ?, ?, ?)",
+        [recorderId, roomCode, requestedTitle || `Recording - ${room.title || roomCode}`, storageUri, durationSeconds]
+      );
+    }
     podcastSaved = true;
-    await pool.execute(
-      "UPDATE recording_logs SET status = 'SAVED', storage_uri = ?, duration_seconds = ?, stopped_at = COALESCE(stopped_at, CURRENT_TIMESTAMP) WHERE room_id = ? AND started_by = ? AND status IN ('RECORDING', 'STOPPED') ORDER BY started_at DESC LIMIT 1",
-      [storageUri, durationSeconds, room.id, userId || "anonymous"]
-    ).catch(error => console.error("Recording log update failed:", error));
+    if (!requestedTitle) {
+      await pool.execute(
+        "UPDATE recording_logs SET status = 'SAVED', storage_uri = ?, duration_seconds = ?, stopped_at = COALESCE(stopped_at, CURRENT_TIMESTAMP) WHERE room_id = ? AND started_by = ? AND status IN ('RECORDING', 'STOPPED') ORDER BY started_at DESC LIMIT 1",
+        [storageUri, durationSeconds, room.id, recorderId]
+      ).catch(error => console.error("Recording log update failed:", error));
+    }
     const audioUrl = `${request.protocol}://${request.get("host")}${storageUri}`;
-    io.to(roomCode).emit("recording:update", { status: "SAVED", audioUrl, durationSeconds });
+    if (!requestedTitle) io.to(roomCode).emit("recording:update", { status: "SAVED", audioUrl, durationSeconds });
     response.json({ ok: true, storageUri, audioUrl, durationSeconds });
   } catch (error) {
     if (!podcastSaved && request.file) await unlink(request.file.path).catch(() => {});
@@ -299,6 +343,28 @@ app.use((error, _request, response, _next) => {
 io.on("connection", (socket) => {
   socket.data.joinedRooms = new Set();
 
+  async function leaveCurrentRoom() {
+    const participant = socketParticipants.get(socket.id);
+    if (!participant) return;
+    socketParticipants.delete(socket.id);
+    socket.data.joinedRooms.delete(participant.roomCode);
+    socket.leave(participant.roomCode);
+    io.to(participant.roomCode).emit("webrtc:user-left", { userId: participant.userId });
+    await pool.execute(
+      "UPDATE realtime_room_participants SET left_at = CURRENT_TIMESTAMP WHERE id = ? AND left_at IS NULL",
+      [participant.participantId]
+    );
+    const [active] = await pool.execute(
+      "SELECT COUNT(*) as cnt FROM realtime_room_participants rp JOIN realtime_rooms rr ON rr.id = rp.room_id WHERE rr.room_code = ? AND rp.left_at IS NULL",
+      [participant.roomCode]
+    );
+    if (active[0].cnt === 0) {
+      await pool.execute("UPDATE realtime_rooms SET status = 'EMPTY' WHERE room_code = ?", [participant.roomCode]);
+    } else {
+      io.to(participant.roomCode).emit("room:state", await serializeRoom(participant.roomCode));
+    }
+  }
+
   socket.on("room:join", async ({ roomId, userId, displayName, role = "anonymous" }, acknowledge) => {
     try {
       if (!roomId || !userId || !displayName) {
@@ -315,7 +381,7 @@ io.on("connection", (socket) => {
         "SELECT id FROM realtime_room_participants WHERE room_id = ? AND anonymous_uid = ? AND left_at IS NULL ORDER BY joined_at DESC LIMIT 1",
         [room.id, userId]
       );
-      socketParticipants.set(socket.id, { roomCode: roomId, participantId: participants[0].id, userId });
+      socketParticipants.set(socket.id, { roomCode: roomId, participantId: participants[0].id, userId, displayName });
       socket.data.joinedRooms.add(roomId);
       socket.join(roomId);
 
@@ -324,6 +390,20 @@ io.on("connection", (socket) => {
       const state = await serializeRoom(roomId);
       io.to(roomId).emit("room:state", state);
       acknowledge?.({ ok: true, room: state });
+    } catch (error) {
+      acknowledge?.({ ok: false, message: error.message });
+    }
+  });
+
+  socket.on("room:leave", async ({ roomId }, acknowledge) => {
+    try {
+      const participant = socketParticipants.get(socket.id);
+      if (!participant || participant.roomCode !== roomId) {
+        acknowledge?.({ ok: false, message: "Join the room before leaving" });
+        return;
+      }
+      await leaveCurrentRoom();
+      acknowledge?.({ ok: true });
     } catch (error) {
       acknowledge?.({ ok: false, message: error.message });
     }
@@ -410,11 +490,76 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("recording:start", async ({ roomId, userId, displayName }, acknowledge) => {
+  socket.on("gift:announce", async ({ roomId, giftId }, acknowledge) => {
+    try {
+      const participant = socketParticipants.get(socket.id);
+      if (!participant || participant.roomCode !== roomId || !giftId) {
+        acknowledge?.({ ok: false, message: "Join the room and provide a gift" });
+        return;
+      }
+      const [rows] = await pool.execute(
+        `SELECT g.id, g.amount, g.message, g.created_at,
+                sender.external_owner_id AS from_user_id, sender_user.display_name AS from_display_name,
+                receiver.external_owner_id AS to_user_id, receiver_user.display_name AS to_display_name
+         FROM gift_transactions g
+         JOIN wallet_accounts sender ON sender.id = g.from_wallet_id
+         JOIN users sender_user ON sender_user.id = sender.external_owner_id
+         JOIN user_roles sender_ur ON sender_ur.user_id = sender_user.id
+         JOIN roles sender_role ON sender_role.id = sender_ur.role_id AND sender_role.name = 'ANONYMOUS'
+         JOIN wallet_accounts receiver ON receiver.id = g.to_wallet_id
+         JOIN users receiver_user ON receiver_user.id = receiver.external_owner_id
+         JOIN user_roles receiver_ur ON receiver_ur.user_id = receiver_user.id
+         JOIN roles receiver_role ON receiver_role.id = receiver_ur.role_id AND receiver_role.name IN ('PRO', 'SUPER')
+         JOIN realtime_room_participants receiver_participant
+           ON receiver_participant.anonymous_uid = receiver.external_owner_id
+          AND receiver_participant.left_at IS NULL
+         JOIN realtime_rooms receiver_room
+           ON receiver_room.id = receiver_participant.room_id
+          AND receiver_room.room_code = g.room_code
+         WHERE g.id = ? AND g.room_code = ? AND sender.external_owner_id = ?
+         LIMIT 1`,
+        [giftId, roomId, participant.userId]
+      );
+      if (rows.length === 0) {
+        acknowledge?.({ ok: false, message: "Gift is not valid for this room" });
+        return;
+      }
+      const [updated] = await pool.execute(
+        "UPDATE gift_transactions SET realtime_event = 'gift:announced' WHERE id = ? AND realtime_event = 'gift:sent'",
+        [giftId]
+      );
+      if (updated.affectedRows === 0) {
+        acknowledge?.({ ok: true, duplicate: true });
+        return;
+      }
+      const gift = rows[0];
+      io.to(roomId).emit("chat:message", {
+        kind: "SUPER_CHAT",
+        id: `gift-${gift.id}`,
+        userId: gift.from_user_id,
+        displayName: gift.from_display_name,
+        toUserId: gift.to_user_id,
+        toDisplayName: gift.to_display_name,
+        amount: Number(gift.amount),
+        message: gift.message || "Cảm ơn buổi học!",
+        createdAt: gift.created_at,
+      });
+      acknowledge?.({ ok: true });
+    } catch (error) {
+      acknowledge?.({ ok: false, message: error.message });
+    }
+  });
+
+  socket.on("recording:start", async ({ roomId, token }, acknowledge) => {
     try {
       const participant = socketParticipants.get(socket.id);
       if (!participant || participant.roomCode !== roomId) {
         acknowledge?.({ ok: false, message: "Join the room before recording" });
+        return;
+      }
+      const recorderId = await recorderIdFromToken(token);
+      if (!recorderId || recorderId !== participant.userId) {
+        acknowledge?.({ ok: false, message: "Only PRO and SUPER users can record" });
         return;
       }
       const room = await ensureRoom(roomId);
@@ -428,32 +573,37 @@ io.on("connection", (socket) => {
       }
       await pool.execute(
         "INSERT INTO recording_logs (room_id, started_by, started_by_display_name, status) VALUES (?, ?, ?, 'RECORDING')",
-        [room.id, userId, displayName]
+        [room.id, recorderId, participant.displayName]
       );
       const [rows] = await pool.execute(
-        "SELECT id FROM recording_logs WHERE room_id = ? AND status = 'RECORDING' ORDER BY started_at DESC LIMIT 1",
+        "SELECT id, started_at FROM recording_logs WHERE room_id = ? AND status = 'RECORDING' ORDER BY started_at DESC LIMIT 1",
         [room.id]
       );
-      io.to(roomId).emit("recording:update", { status: "RECORDING", startedBy: displayName, recordingId: rows[0].id });
+      io.to(roomId).emit("recording:update", { status: "RECORDING", startedBy: participant.displayName, startedAt: rows[0].started_at, recordingId: rows[0].id });
       acknowledge?.({ ok: true, recordingId: rows[0].id });
     } catch (error) {
       acknowledge?.({ ok: false, message: error.message });
     }
   });
 
-  socket.on("recording:stop", async ({ roomId }, acknowledge) => {
+  socket.on("recording:stop", async ({ roomId, token }, acknowledge) => {
     try {
       const participant = socketParticipants.get(socket.id);
       if (!participant || participant.roomCode !== roomId) {
         acknowledge?.({ ok: false, message: "Join the room first" });
         return;
       }
+      const recorderId = await recorderIdFromToken(token);
+      if (!recorderId || recorderId !== participant.userId) {
+        acknowledge?.({ ok: false, message: "Only PRO and SUPER users can stop recordings" });
+        return;
+      }
       await pool.execute(
         `UPDATE recording_logs rl
          JOIN realtime_rooms rr ON rr.id = rl.room_id
          SET rl.status = 'STOPPED', rl.stopped_at = CURRENT_TIMESTAMP
-         WHERE rr.room_code = ? AND rl.status = 'RECORDING'`,
-        [roomId]
+         WHERE rr.room_code = ? AND rl.started_by = ? AND rl.status = 'RECORDING'`,
+        [roomId, recorderId]
       );
       acknowledge?.({ ok: true });
     } catch (error) {
@@ -496,23 +646,7 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", async () => {
     try {
-      const participant = socketParticipants.get(socket.id);
-      if (!participant) return;
-      socketParticipants.delete(socket.id);
-      io.to(participant.roomCode).emit("webrtc:user-left", { userId: participant.userId });
-      await pool.execute(
-        "UPDATE realtime_room_participants SET left_at = CURRENT_TIMESTAMP WHERE anonymous_uid = ? AND room_id = (SELECT id FROM realtime_rooms WHERE room_code = ?) AND left_at IS NULL",
-        [participant.userId, participant.roomCode]
-      );
-      const [active] = await pool.execute(
-        "SELECT COUNT(*) as cnt FROM realtime_room_participants rp JOIN realtime_rooms rr ON rr.id = rp.room_id WHERE rr.room_code = ? AND rp.left_at IS NULL",
-        [participant.roomCode]
-      );
-      if (active[0].cnt === 0) {
-        await pool.execute("UPDATE realtime_rooms SET status = 'EMPTY' WHERE room_code = ?", [participant.roomCode]);
-      }
-      const state = await serializeRoom(participant.roomCode);
-      io.to(participant.roomCode).emit("room:state", state);
+      await leaveCurrentRoom();
     } catch (error) {
       console.error("Disconnect error:", error);
     }
@@ -532,4 +666,4 @@ if (!process.env.LUCY_TEST) {
   });
 }
 
-export { app, audioExtension, parseRoomCode, server };
+export { app, audioExtension, parseRoomCode, recorderIdFromToken, server };
