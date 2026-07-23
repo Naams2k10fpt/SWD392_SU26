@@ -18,6 +18,8 @@ type Gift = {
   id: string;
   fromUserId: string;
   toCreatorId: string;
+  fromDisplayName?: string;
+  toDisplayName?: string;
   roomId?: string;
   amount: number;
   message?: string;
@@ -26,6 +28,7 @@ type Gift = {
 type Podcast = {
   id: string;
   creatorId: string;
+  creatorDisplayName?: string;
   roomId: string;
   title: string;
   storageUri: string;
@@ -47,10 +50,15 @@ type ChatMessage = {
   displayName: string;
   message: string;
   createdAt: string;
+  kind?: "CHAT" | "SUPER_CHAT";
+  amount?: number;
+  toUserId?: string;
+  toDisplayName?: string;
 };
 type RecordingState = {
   status: 'RECORDING' | 'SAVED' | 'NONE' | 'ERROR';
   startedBy?: string;
+  startedAt?: string;
   recordingId?: string;
   audioUrl?: string;
   error?: string;
@@ -72,9 +80,21 @@ declare global {
 
 const SESSION_KEY = "lucy_session";
 const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL || "http://localhost:3020";
+const SPEAKING_THRESHOLD = 0.035;
+const SPEAKING_HOLD_FRAMES = 8;
 const playableAudioUrl = (storageUri: string) => /^https?:\/\//i.test(storageUri)
   ? storageUri
   : storageUri.startsWith("/") ? `${REALTIME_URL.replace(/\/$/, "")}${storageUri}` : "";
+const audioFileDuration = (file: File) => new Promise<number>((resolve, reject) => {
+  const url = URL.createObjectURL(file);
+  const audio = new Audio(url);
+  audio.onloadedmetadata = () => {
+    URL.revokeObjectURL(url);
+    const seconds = Math.round(audio.duration);
+    Number.isFinite(seconds) && seconds > 0 ? resolve(seconds) : reject(new Error("Không đọc được thời lượng audio"));
+  };
+  audio.onerror = () => { URL.revokeObjectURL(url); reject(new Error("File audio không hợp lệ")); };
+});
 const routes = new Set<Route>([
   "/login",
   "/register",
@@ -219,8 +239,8 @@ export default function LucyPage() {
       <LoginView onLogin={saveSession} />
     )
   ) : (
-    <AppShell route={route} session={session} logout={logout} onCreateRoom={() => setShowCreateRoom(true)}>
-      {route === "/room" && <RoomView session={session} onCreateRoom={() => setShowCreateRoom(true)} />}
+    <AppShell route={route} session={session} logout={logout}>
+      <RoomView session={session} compact={route !== "/room"} onCreateRoom={() => setShowCreateRoom(true)} />
       {route === "/wallet" && <WalletView session={session} notify={notify} />}
       {route === "/gifts" && <GiftsView session={session} notify={notify} />}
       {route === "/podcasts" && <PodcastsView session={session} />}
@@ -317,13 +337,12 @@ const nav = [
   ["/podcasts", "📻", "Podcast"],
 ] as const;
 
-function AppShell({ route, session, logout, onCreateRoom, children }: { route: Route; session: Session; logout: () => void; onCreateRoom?: () => void; children: React.ReactNode }) {
-  const canCreate = session.user.role === "PRO" || session.user.role === "SUPER";
+function AppShell({ route, session, logout, children }: { route: Route; session: Session; logout: () => void; children: React.ReactNode }) {
   return <div className="app-shell">
     <aside className="sidebar">
       <a className="side-brand" href="#/home"><span>✦</span><b>LUCY</b></a>
       <nav aria-label="Điều hướng chính">{nav.map(([href, icon, label]) => <a key={href} href={`#${href}`} className={route === href ? "active" : ""}><span>{icon}</span>{label}</a>)}</nav>
-      <div className="side-user"><span className="avatar">{session.user.displayName?.[0]?.toUpperCase() || "U"}</span><div><b>{session.user.displayName}</b><small>{session.user.role}</small></div>{canCreate && <button onClick={onCreateRoom} aria-label="Tạo phòng" title="Tạo phòng học mới">＋</button>}<button onClick={logout} aria-label="Đăng xuất" title="Đăng xuất">↪</button></div>
+      <div className="side-user"><span className="avatar">{session.user.displayName?.[0]?.toUpperCase() || "U"}</span><div><b>{session.user.displayName}</b><small>{session.user.role}</small></div><button onClick={logout} aria-label="Đăng xuất" title="Đăng xuất">↪</button></div>
     </aside>
     <main className="main-area">
       <header className="topbar"><div><small>LUCY · Phase 5</small><h1>{nav.find(([href]) => href === route)?.[2] || "Trang chủ"}</h1></div><span className="role-pill">{session.user.role}</span></header>
@@ -414,7 +433,7 @@ function GiftsView({ session, notify }: { session: Session; notify: (message: st
     if (!(amount > 0)) { setError("Số tiền không hợp lệ"); return; }
     setSending(true); setError("");
     try {
-      await api<Gift | { transaction: Gift }>("wallet", "/gifts", { method: "POST", token: session.token, body: JSON.stringify({ fromUserId: form.get("fromUserId"), toCreatorId: form.get("toCreatorId"), amount, message: form.get("message") }) });
+      await api<Gift | { transaction: Gift }>("wallet", "/gifts", { method: "POST", token: session.token, body: JSON.stringify({ fromUserId: session.user.id, toCreatorId: form.get("toCreatorId"), amount, message: form.get("message") }) });
       formElement.reset();
       notify("Gửi quà thành công!");
       await load();
@@ -422,14 +441,19 @@ function GiftsView({ session, notify }: { session: Session; notify: (message: st
     finally { setSending(false); }
   }
 
-  return <div className="two-column gifts-layout"><section className="panel sticky-panel"><span className="eyebrow">🎁 Quà tặng</span><h2>Gửi quà</h2><p className="muted">Ủng hộ creator bằng số dư ví LUCY của bạn.</p><form className="form compact" onSubmit={send}><label>Từ User ID<input name="fromUserId" defaultValue={session.user.id} required /></label><label>Đến Creator ID<input name="toCreatorId" placeholder="creator-1" required /></label><label>Số tiền<input name="amount" type="number" min="1000" step="1000" required /></label><label>Lời nhắn<textarea name="message" rows={3} placeholder="Cảm ơn bài học!" /></label>{error && <p className="error" role="alert">{error}</p>}<button className="primary-button" disabled={sending}>{sending ? "Đang gửi…" : "Gửi quà"}</button></form></section><section className="panel"><div className="panel-title"><div><span className="eyebrow">Hoạt động</span><h2>Lịch sử quà tặng</h2></div><button className="icon-button" onClick={load} aria-label="Làm mới">↻</button></div>{loading ? <Empty text="Đang tải giao dịch…" loading /> : gifts.length ? <div className="list">{gifts.map(gift => <article className="list-item" key={gift.id}><span className="avatar gift-avatar">{gift.fromUserId[0]?.toUpperCase()}</span><div><h3>{gift.fromUserId} <span>→</span> {gift.toCreatorId}</h3><p>{gift.message || "Không có lời nhắn"}</p><small>{dateTime(gift.createdAt)}</small></div><strong>{money(gift.amount)}</strong></article>)}</div> : <Empty text="Chưa có giao dịch quà tặng" />}</section></div>;
+  return <div className="two-column gifts-layout"><section className="panel sticky-panel"><span className="eyebrow">🎁 Quà tặng</span><h2>Gửi quà</h2><p className="muted">Ủng hộ creator bằng số dư ví LUCY của bạn.</p><form className="form compact" onSubmit={send}><label>Từ<input value={session.user.displayName} disabled /></label><label>Đến Creator ID<input name="toCreatorId" placeholder="creator-1" required /></label><label>Số tiền<input name="amount" type="number" min="1000" step="1000" required /></label><label>Lời nhắn<textarea name="message" rows={3} placeholder="Cảm ơn bài học!" /></label>{error && <p className="error" role="alert">{error}</p>}<button className="primary-button" disabled={sending}>{sending ? "Đang gửi…" : "Gửi quà"}</button></form></section><section className="panel"><div className="panel-title"><div><span className="eyebrow">Hoạt động</span><h2>Lịch sử quà tặng</h2></div><button className="icon-button" onClick={load} aria-label="Làm mới">↻</button></div>{loading ? <Empty text="Đang tải giao dịch…" loading /> : gifts.length ? <div className="list">{gifts.map(gift => { const senderName = gift.fromDisplayName || gift.fromUserId; const receiverName = gift.toDisplayName || gift.toCreatorId; return <article className="list-item" key={gift.id}><span className="avatar gift-avatar">{senderName[0]?.toUpperCase()}</span><div><h3>{senderName} <span>→</span> {receiverName}</h3><p>{gift.message || "Không có lời nhắn"}</p><small>{dateTime(gift.createdAt)}</small></div><strong>{money(gift.amount)}</strong></article>; })}</div> : <Empty text="Chưa có giao dịch quà tặng" />}</section></div>;
 }
 
 function PodcastsView({ session }: { session: Session }) {
   const [items, setItems] = useState<Podcast[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const isSuper = session.user.role.toUpperCase() === "SUPER";
+  const [query, setQuery] = useState("");
+  const [roomFilter, setRoomFilter] = useState("");
+  const [creatingPodcast, setCreatingPodcast] = useState(false);
+  const [editingItem, setEditingItem] = useState<Podcast | null>(null);
+  const [busyPodcastId, setBusyPodcastId] = useState("");
+  const canManage = ["PRO", "SUPER"].includes(session.user.role.toUpperCase());
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try { setItems(await api<Podcast[]>("wallet", "/podcasts/recordings", { token: session.token })); }
@@ -439,19 +463,126 @@ function PodcastsView({ session }: { session: Session }) {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
 
+  const roomOptions = useMemo(() => [...new Set(items.map(item => item.roomId))].sort(), [items]);
+  const filteredItems = useMemo(() => {
+    const keyword = query.trim().toLocaleLowerCase("vi-VN");
+    return items.filter(item => (!roomFilter || item.roomId === roomFilter) && (!keyword
+      || item.title.toLocaleLowerCase("vi-VN").includes(keyword)
+      || item.roomId.toLocaleLowerCase("vi-VN").includes(keyword)
+      || (item.creatorDisplayName || item.creatorId).toLocaleLowerCase("vi-VN").includes(keyword)));
+  }, [items, query, roomFilter]);
+
+  async function uploadPodcastAudio(formElement: HTMLFormElement, item?: Podcast) {
+    const form = new FormData(formElement);
+    const file = form.get("audio");
+    if (!(file instanceof File) || !file.size) throw new Error("Vui lòng chọn file audio");
+    if (file.size > 50 * 1024 * 1024) throw new Error("File audio không được vượt quá 50 MB");
+    const payload = new FormData();
+    payload.append("audio", file);
+    payload.append("title", String(form.get("title") || "").trim());
+    payload.append("roomCode", item?.roomId || String(form.get("roomCode") || "").trim());
+    payload.append("userId", session.user.id);
+    payload.append("durationSeconds", String(await audioFileDuration(file)));
+    if (item) payload.append("podcastId", item.id);
+    const response = await fetch(`${REALTIME_URL}/api/upload-recording`, { method: "POST", headers: { Authorization: `Bearer ${session.token}` }, body: payload });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(body?.message || `Không thể tải audio (${response.status})`);
+  }
+
+  async function createPodcast(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    setBusyPodcastId("new"); setError("");
+    try {
+      await uploadPodcastAudio(formElement);
+      formElement.reset(); setCreatingPodcast(false);
+      await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Không thể nhập podcast"); }
+    finally { setBusyPodcastId(""); }
+  }
+
+  async function updatePodcast(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingItem) return;
+    const title = String(new FormData(event.currentTarget).get("title") || "").trim();
+    if (!title) return;
+    setBusyPodcastId(editingItem.id); setError("");
+    try {
+      const audio = new FormData(event.currentTarget).get("audio");
+      if (audio instanceof File && audio.size) await uploadPodcastAudio(event.currentTarget, editingItem);
+      else await api("wallet", `/podcasts/recordings/${encodeURIComponent(editingItem.id)}`, { method: "PUT", token: session.token, body: JSON.stringify({ title }) });
+      setEditingItem(null);
+      await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Không thể cập nhật podcast"); }
+    finally { setBusyPodcastId(""); }
+  }
+
+  async function deletePodcast(item: Podcast) {
+    if (!window.confirm(`Bạn có chắc muốn xóa podcast “${item.title}”?`)) return;
+    setBusyPodcastId(item.id); setError("");
+    try {
+      await api("wallet", `/podcasts/recordings/${encodeURIComponent(item.id)}`, { method: "DELETE", token: session.token });
+      await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Không thể xóa podcast"); }
+    finally { setBusyPodcastId(""); }
+  }
+
   return <>
     <div className="section-heading">
       <div><span className="eyebrow">📻 Thư viện</span><h2>Podcast bài học</h2><p>Nghe lại nội dung từ các phòng học LUCY.</p></div>
-      {isSuper && <button className="primary-button fit" onClick={() => navigate("/room")}>⏺ Ghi âm mới</button>}
+      {canManage && <button className="primary-button fit" onClick={() => { setError(""); setCreatingPodcast(true); }}>＋ Nhập audio</button>}
     </div>
     {error && <p className="error banner" role="alert">{error} <button onClick={load}>Thử lại</button></p>}
-    {loading ? <Empty text="Đang tải podcast…" loading /> : items.length ? <section className="podcast-grid">{items.map(item => {
+
+    {creatingPodcast && <div className="modal-backdrop" onMouseDown={() => !busyPodcastId && setCreatingPodcast(false)}>
+      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="create-podcast-title" onMouseDown={event => event.stopPropagation()}>
+        <span className="eyebrow">Podcast</span><h2 id="create-podcast-title">Nhập audio mới</h2>
+        <form className="form" onSubmit={createPodcast}>
+          <label>Tiêu đề<input name="title" maxLength={255} autoFocus required /></label>
+          <label>Phòng học<input name="roomCode" list="podcast-room-options" defaultValue={roomFilter} maxLength={80} required /></label>
+          <datalist id="podcast-room-options">{roomOptions.map(room => <option key={room} value={room} />)}</datalist>
+          <label>File audio<input name="audio" type="file" accept="audio/webm,audio/mp4,audio/wav,audio/mpeg,audio/ogg,.m4a" required /><small>WebM, M4A, WAV, MP3 hoặc OGG · tối đa 50 MB</small></label>
+          {error && <p className="error" role="alert">{error}</p>}
+          <div className="modal-actions"><button type="button" className="secondary-button" disabled={Boolean(busyPodcastId)} onClick={() => setCreatingPodcast(false)}>Hủy</button><button className="primary-button" disabled={Boolean(busyPodcastId)}>{busyPodcastId ? "Đang tải…" : "Nhập podcast"}</button></div>
+        </form>
+      </section>
+    </div>}
+
+    {editingItem && <div className="modal-backdrop" onMouseDown={() => !busyPodcastId && setEditingItem(null)}>
+      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="edit-podcast-title" onMouseDown={event => event.stopPropagation()}>
+        <span className="eyebrow">Podcast</span><h2 id="edit-podcast-title">Sửa podcast</h2>
+        <form className="form" onSubmit={updatePodcast}>
+          <label>Tiêu đề<input name="title" defaultValue={editingItem.title} maxLength={255} autoFocus required /></label>
+          <label>Thay audio <small>(không bắt buộc)</small><input name="audio" type="file" accept="audio/webm,audio/mp4,audio/wav,audio/mpeg,audio/ogg,.m4a" /><small>Để trống nếu chỉ muốn đổi tiêu đề · tối đa 50 MB</small></label>
+          {error && <p className="error" role="alert">{error}</p>}
+          <div className="modal-actions"><button type="button" className="secondary-button" disabled={Boolean(busyPodcastId)} onClick={() => setEditingItem(null)}>Hủy</button><button className="primary-button" disabled={Boolean(busyPodcastId)}>{busyPodcastId ? "Đang lưu…" : "Lưu"}</button></div>
+        </form>
+      </section>
+    </div>}
+
+    {loading ? <Empty text="Đang tải podcast…" loading /> : items.length ? <>
+      <div className="podcast-toolbar">
+        <label className="podcast-search"><span>⌕</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Tìm theo tiêu đề, tác giả hoặc phòng…" aria-label="Tìm podcast" /></label>
+        <select value={roomFilter} onChange={event => setRoomFilter(event.target.value)} aria-label="Lọc theo phòng"><option value="">Tất cả phòng</option>{roomOptions.map(room => <option key={room} value={room}>{room}</option>)}</select>
+        <small>{filteredItems.length} podcast</small>
+      </div>
+      {filteredItems.length ? <section className="podcast-grid">{filteredItems.map(item => {
       const audioUrl = playableAudioUrl(item.storageUri);
-      return <article className="podcast-card" key={item.id} style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}><div className="podcast-art"><span>▶</span><small>{duration(item.durationSeconds)}</small></div><div style={{ flex: 1 }}><span className="eyebrow">{item.roomId}</span><h3>{item.title}</h3><p>Tác giả: {item.creatorId}</p><small>{dateTime(item.createdAt)}</small></div></div>
-        {audioUrl ? <audio src={audioUrl} controls preload="metadata" style={{ width: '100%', height: 40, borderRadius: 8 }} /> : <button disabled title="Podcast chưa có URL audio HTTP hợp lệ" aria-label="Phát podcast" style={{ alignSelf: 'flex-start' }}>▶</button>}
+      return <article className="podcast-card" key={item.id}>
+        <div className="podcast-card-main">
+          <div className="podcast-art" aria-hidden="true"><span>▶</span><small>{duration(item.durationSeconds)}</small></div>
+          <div className="podcast-info">
+            <span className="podcast-room">{item.roomId}</span>
+            <h3>{item.title}</h3>
+            <p>Tác giả: <b>{item.creatorDisplayName || item.creatorId}</b></p>
+            <time dateTime={item.createdAt}>{dateTime(item.createdAt)}</time>
+          </div>
+          {canManage && <div className="podcast-card-actions"><button onClick={() => { setError(""); setEditingItem(item); }} aria-label={`Sửa ${item.title}`} title="Sửa podcast">✎</button><button className="danger" onClick={() => deletePodcast(item)} disabled={busyPodcastId === item.id} aria-label={`Xóa ${item.title}`} title="Xóa podcast">⌫</button></div>}
+        </div>
+        {audioUrl ? <audio className="podcast-player" src={audioUrl} controls preload="metadata" /> : <div className="podcast-unavailable">Chưa có tệp âm thanh</div>}
       </article>;
-    })}</section> : <Empty text="Chưa có bản ghi podcast nào" />}
+    })}</section> : <Empty text="Không tìm thấy podcast phù hợp" />}
+    </> : <Empty text="Chưa có bản ghi podcast nào" />}
   </>;
 }
 
@@ -624,7 +755,9 @@ function RoomBrowser({ session, onJoin, connected, onCreateRoom }: { session: Se
   </div>;
 }
 
-function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: () => void }) {
+function RoomView({ session, compact, onCreateRoom }: { session: Session; compact: boolean; onCreateRoom?: () => void }) {
+  const canRecord = ["PRO", "SUPER"].includes(session.user.role.toUpperCase());
+  const isLearner = session.user.role.toUpperCase() === "ANONYMOUS";
   const socketRef = useRef<Socket | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
@@ -641,12 +774,72 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
   const [recording, setRecording] = useState<RecordingState>({ status: 'NONE' });
   const [remoteUsers, setRemoteUsers] = useState<{ userId: string; displayName: string }[]>([]);
   const [chatOpen, setChatOpen] = useState(true);
+  const [superChatOpen, setSuperChatOpen] = useState(false);
+  const [giftSending, setGiftSending] = useState(false);
+  const [giftError, setGiftError] = useState("");
+  const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(() => new Set());
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const pendingIceRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const remoteStreamsRef = useRef<Map<string, MediaStream>>(new Map());
   const remoteAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const speakingContextRef = useRef<AudioContext | null>(null);
+  const speakingMonitorsRef = useRef<Map<string, { source: MediaStreamAudioSourceNode; frame: number }>>(new Map());
+
+  function setUserSpeaking(userId: string, speaking: boolean) {
+    setSpeakingUsers(current => {
+      if (current.has(userId) === speaking) return current;
+      const next = new Set(current);
+      if (speaking) next.add(userId); else next.delete(userId);
+      return next;
+    });
+  }
+
+  function stopSpeakingMonitor(userId: string) {
+    const monitor = speakingMonitorsRef.current.get(userId);
+    if (!monitor) return;
+    cancelAnimationFrame(monitor.frame);
+    monitor.source.disconnect();
+    speakingMonitorsRef.current.delete(userId);
+    setUserSpeaking(userId, false);
+  }
+
+  function stopAllSpeakingMonitors(updateState = true) {
+    speakingMonitorsRef.current.forEach(monitor => {
+      cancelAnimationFrame(monitor.frame);
+      monitor.source.disconnect();
+    });
+    speakingMonitorsRef.current.clear();
+    speakingContextRef.current?.close();
+    speakingContextRef.current = null;
+    if (updateState) setSpeakingUsers(new Set());
+  }
+
+  function watchSpeaking(userId: string, stream: MediaStream) {
+    stopSpeakingMonitor(userId);
+    const context = speakingContextRef.current || new AudioContext();
+    speakingContextRef.current = context;
+    void context.resume().catch(() => {});
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 256;
+    const samples = new Uint8Array(analyser.fftSize);
+    const source = context.createMediaStreamSource(stream);
+    source.connect(analyser);
+    const monitor = { source, frame: 0 };
+    let quietFrames = SPEAKING_HOLD_FRAMES;
+    const measure = () => {
+      analyser.getByteTimeDomainData(samples);
+      let energy = 0;
+      for (const sample of samples) energy += ((sample - 128) / 128) ** 2;
+      const hasVoice = Math.sqrt(energy / samples.length) > SPEAKING_THRESHOLD;
+      quietFrames = hasVoice ? 0 : quietFrames + 1;
+      setUserSpeaking(userId, hasVoice || quietFrames < SPEAKING_HOLD_FRAMES);
+      monitor.frame = requestAnimationFrame(measure);
+    };
+    monitor.frame = requestAnimationFrame(measure);
+    speakingMonitorsRef.current.set(userId, monitor);
+  }
 
 
   useEffect(() => {
@@ -670,6 +863,7 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
         pendingIceRef.current.clear();
         remoteStreamsRef.current.clear();
         remoteAudioRefs.current.clear();
+        stopAllSpeakingMonitors();
         setMic(false);
         setRemoteUsers([]);
       });
@@ -679,6 +873,13 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
         setMessages(prev => [...prev, msg]);
       });
       liveSocket.on("recording:update", (state: RecordingState) => {
+        if (state.status === 'RECORDING') {
+          const startedAt = state.startedAt ? new Date(state.startedAt).getTime() : Date.now();
+          recordingStartedAtRef.current = Number.isFinite(startedAt) ? startedAt : Date.now();
+          setRecordingElapsed(Math.max(0, Math.floor((Date.now() - recordingStartedAtRef.current) / 1000)));
+        } else {
+          setRecordingElapsed(0);
+        }
         setRecording(prev => ({ ...prev, ...state }));
       });
       liveSocket.on("webrtc:offer", ({ userId, sdp }: { userId: string; sdp: RTCSessionDescriptionInit }) => {
@@ -709,7 +910,15 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
       script.addEventListener("error", () => setError("Không tải được Socket.IO client"), { once: true });
       if (!existing) document.head.appendChild(script);
     }
-    return () => { active = false; liveSocket?.off(); liveSocket?.disconnect(); };
+    return () => {
+      active = false;
+      localStreamRef.current?.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+      peerConnectionsRef.current.forEach(pc => pc.close());
+      stopAllSpeakingMonitors(false);
+      liveSocket?.off();
+      liveSocket?.disconnect();
+    };
   }, []);
 
   function toggleHand() { const s = socketRef.current || socket; const next = !hand; s?.emit("hand:raise", { roomId, raised: next }); setHand(next); }
@@ -718,6 +927,7 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
     if (!s || !joined) return;
     if (mic) {
       localStreamRef.current?.getAudioTracks().forEach(track => { track.enabled = false; });
+      stopSpeakingMonitor(session.user.id);
       s.emit("mic:toggle", { roomId, enabled: false });
       setMic(false);
       return;
@@ -730,6 +940,7 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
     }
 
     stream.getAudioTracks().forEach(track => { track.enabled = true; });
+    watchSpeaking(session.user.id, stream);
     for (const [userId, pc] of peerConnectionsRef.current) {
       if (!pc.getSenders().some(sender => sender.track?.kind === "audio")) {
         stream.getAudioTracks().forEach(track => pc.addTrack(track, stream));
@@ -760,6 +971,42 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
       if (result?.ok) setChatInput("");
     });
   }
+
+  function leaveRoom() {
+    const s = socketRef.current || socket;
+    if (!s || !joined) return;
+    if (recording.status === 'RECORDING') {
+      setRecordingElapsed(0);
+      mediaRecorderRef.current?.stop();
+      mediaRecorderRef.current = null;
+      s.emit("recording:stop", { roomId, token: session.token });
+    }
+    s.emit("room:leave", { roomId }, (result: { ok: boolean; message?: string }) => {
+      if (!result?.ok) { setError(result?.message || "Không thể thoát phòng"); return; }
+      stopLocalStream();
+      peerConnectionsRef.current.forEach(pc => pc.close());
+      peerConnectionsRef.current.clear();
+      pendingIceRef.current.clear();
+      remoteStreamsRef.current.clear();
+      remoteAudioRefs.current.clear();
+      stopAllSpeakingMonitors();
+      setJoined(false);
+      setRoomId("");
+      setRoom(null);
+      setMessages([]);
+      setMic(false);
+      setHand(false);
+      setLatency(null);
+      setRemoteUsers([]);
+      setShowBrowser(true);
+      setError("");
+    });
+  }
+
+  function confirmLeaveRoom() {
+    if (window.confirm("Bạn có chắc muốn thoát phòng và trở về danh sách phòng?")) leaveRoom();
+  }
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingContextRef = useRef<AudioContext | null>(null);
   const recordingDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
@@ -768,12 +1015,22 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
   const recordingsListRef = useRef<{ id: number; url: string; status: string }[]>([]);
   const recIdCounterRef = useRef(0);
   const [recordingsList, setRecordingsList] = useState<{ id: number; url: string; status: string }[]>([]);
+  const [recordingElapsed, setRecordingElapsed] = useState(0);
+
+  useEffect(() => {
+    if (recording.status !== 'RECORDING') return;
+    const timer = window.setInterval(() => {
+      setRecordingElapsed(Math.max(0, Math.floor((Date.now() - recordingStartedAtRef.current) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [recording.status]);
 
   async function toggleRecording() {
+    if (!canRecord) { setError("Chỉ PRO và SUPER mới được ghi âm"); return; }
     if (recording.status === 'RECORDING') {
       mediaRecorderRef.current?.stop();
       mediaRecorderRef.current = null;
-      (socketRef.current || socket)?.emit("recording:stop", { roomId });
+      (socketRef.current || socket)?.emit("recording:stop", { roomId, token: session.token });
     } else {
       const streams = [localStreamRef.current, ...remoteStreamsRef.current.values()]
         .filter((stream): stream is MediaStream => Boolean(stream?.getAudioTracks().length));
@@ -802,6 +1059,7 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
         recordingsListRef.current = [...recordingsListRef.current, entry];
         setRecordingsList([...recordingsListRef.current]);
         setRecording({ status: 'NONE' });
+        setRecordingElapsed(0);
         audioChunksRef.current = [];
         await recordingContextRef.current?.close();
         recordingContextRef.current = null;
@@ -820,6 +1078,7 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
           formData.append("durationSeconds", String(durationSeconds));
           const response = await fetch(`${REALTIME_URL}/api/upload-recording`, {
             method: "POST",
+            headers: { Authorization: `Bearer ${session.token}` },
             body: formData,
           });
           const data = await response.json();
@@ -841,8 +1100,9 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
       };
       mediaRecorderRef.current = recorder;
       recordingStartedAtRef.current = Date.now();
+      setRecordingElapsed(0);
       recorder.start();
-      (socketRef.current || socket)?.emit("recording:start", { roomId, userId: session.user.id, displayName: session.user.displayName });
+      (socketRef.current || socket)?.emit("recording:start", { roomId, token: session.token });
       setRecording({ status: 'RECORDING' });
     }
   }
@@ -852,6 +1112,7 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
+      watchSpeaking(session.user.id, stream);
       if (recordingContextRef.current && recordingDestinationRef.current) {
         recordingContextRef.current.createMediaStreamSource(stream).connect(recordingDestinationRef.current);
       }
@@ -865,6 +1126,7 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
+      stopSpeakingMonitor(session.user.id);
     }
   }
 
@@ -897,6 +1159,7 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
       const remoteStream = e.streams[0];
       if (remoteStream) {
         remoteStreamsRef.current.set(targetUserId, remoteStream);
+        watchSpeaking(targetUserId, remoteStream);
         if (recordingContextRef.current && recordingDestinationRef.current) {
           recordingContextRef.current.createMediaStreamSource(remoteStream).connect(recordingDestinationRef.current);
         }
@@ -959,9 +1222,45 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
     }
     remoteStreamsRef.current.delete(userId);
     pendingIceRef.current.delete(userId);
+    stopSpeakingMonitor(userId);
   }
 
   const participants = useMemo(() => room?.users || [], [room]);
+  const giftRecipients = useMemo(
+    () => participants.filter(person => person.userId !== session.user.id && ["PRO", "SUPER"].includes(person.role.toUpperCase())),
+    [participants, session.user.id],
+  );
+
+  async function sendSuperChat(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const toCreatorId = String(form.get("toCreatorId") || "");
+    const amount = Number(form.get("amount"));
+    if (!giftRecipients.some(person => person.userId === toCreatorId) || !(amount > 0)) {
+      setGiftError("Mentor hoặc số tiền không hợp lệ");
+      return;
+    }
+    setGiftSending(true);
+    setGiftError("");
+    try {
+      const result = await api<Gift | { transaction: Gift }>("wallet", "/gifts", {
+        method: "POST",
+        token: session.token,
+        body: JSON.stringify({ fromUserId: session.user.id, toCreatorId, roomId, amount, message: form.get("message") }),
+      });
+      const gift = "transaction" in result ? result.transaction : result;
+      formElement.reset();
+      setSuperChatOpen(false);
+      (socketRef.current || socket)?.emit("gift:announce", { roomId, giftId: gift.id }, (announcement: { ok: boolean }) => {
+        if (!announcement?.ok) setError("Gift đã gửi thành công nhưng thẻ Super Chat chưa hiển thị. Vui lòng không gửi lại.");
+      });
+    } catch (reason) {
+      setGiftError(reason instanceof Error ? reason.message : "Không thể gửi Super Chat");
+    } finally {
+      setGiftSending(false);
+    }
+  }
 
   function joinRoom(code: string) {
     const s = socketRef.current || socket;
@@ -999,6 +1298,25 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
     return () => { delete (window as any).__lucyJoinRoom; };
   }, []);
 
+  if (compact) {
+    if (!joined) return null;
+    return <aside className={`mini-room${recording.status === 'RECORDING' ? " recording" : ""}`} aria-label="Phòng học đang tham gia">
+      <button className="mini-room-main" onClick={() => navigate("/room")}>
+        <span className="mini-room-avatar">{session.user.displayName[0]?.toUpperCase() || "U"}</span>
+        <span className="mini-room-info">
+          <small>{recording.status === 'RECORDING' ? `🔴 Đang ghi · ${duration(recordingElapsed)}` : connected ? "Đang trong phòng" : "Đang kết nối lại"}</small>
+          <strong>{room?.title || roomId}</strong>
+          <em>{participants.length} người tham gia</em>
+        </span>
+      </button>
+      <div className="mini-room-actions">
+        <button className={mic ? "active" : ""} onClick={toggleMic} aria-label={mic ? "Tắt mic" : "Bật mic"}>{mic ? "🎤" : "🔇"}</button>
+        <button onClick={() => navigate("/room")} aria-label="Quay lại phòng">↗</button>
+        <button className="leave" onClick={confirmLeaveRoom} aria-label="Thoát phòng">↪</button>
+      </div>
+    </aside>;
+  }
+
   if (showBrowser) {
     return <RoomBrowser session={session} onJoin={joinRoom} connected={connected} onCreateRoom={onCreateRoom} />;
   }
@@ -1006,7 +1324,7 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
   return <div className="room-view">
     {/* ── Topbar ── */}
     <header className="room-topbar">
-      <button className="room-back" onClick={() => setShowBrowser(true)}>
+      <button className="room-back" onClick={confirmLeaveRoom}>
         ← Danh sách phòng
       </button>
       <div className="room-topbar-info">
@@ -1033,13 +1351,43 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
       </div>
     )}
 
+    {superChatOpen && (
+      <div className="modal-backdrop" onMouseDown={() => !giftSending && setSuperChatOpen(false)}>
+        <section className="modal super-chat-modal" role="dialog" aria-modal="true" aria-labelledby="super-chat-title" onMouseDown={event => event.stopPropagation()}>
+          <span className="eyebrow">💎 Super Chat</span>
+          <h2 id="super-chat-title">Gửi quà trong phòng</h2>
+          <p className="muted">Tin nhắn của bạn sẽ được làm nổi bật cho cả phòng sau khi giao dịch thành công.</p>
+          <form className="form" onSubmit={sendSuperChat}>
+            <label>Gửi đến
+              <select name="toCreatorId" required defaultValue={giftRecipients[0]?.userId || ""}>
+                {giftRecipients.length === 0 && <option value="" disabled>Chưa có PRO hoặc SUPER trong phòng</option>}
+                {giftRecipients.map(person => <option key={person.userId} value={person.userId}>{person.displayName} · {person.role}</option>)}
+              </select>
+            </label>
+            <label>Số tiền
+              <input name="amount" type="number" min="1000" step="1000" placeholder="50.000" required />
+            </label>
+            <label>Lời nhắn
+              <textarea name="message" rows={3} maxLength={240} placeholder="Cảm ơn buổi học!" />
+            </label>
+            {giftError && <p className="error" role="alert">{giftError}</p>}
+            <div className="modal-actions">
+              <button type="button" className="secondary-button" disabled={giftSending} onClick={() => setSuperChatOpen(false)}>Hủy</button>
+              <button className="primary-button super-chat-submit" disabled={giftSending || giftRecipients.length === 0}>{giftSending ? "Đang gửi…" : "Gửi Super Chat"}</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    )}
+
     {/* ── Main body: participants grid + chat drawer ── */}
     <div className="room-body">
       <div className="room-main">
         {participants.length ? (
           <div className="participants-grid">
-            {participants.map(person => (
-              <div className="participant-tile" key={person.participantId}>
+            {participants.map(person => {
+              const isSpeaking = speakingUsers.has(person.userId);
+              return <div className={`participant-tile${isSpeaking ? " speaking" : ""}`} key={person.participantId} aria-label={`${person.displayName}${isSpeaking ? ", đang nói" : ""}`}>
                 <div className="tile-avatar">
                   <span>{person.displayName[0]?.toUpperCase()}</span>
                 </div>
@@ -1056,8 +1404,8 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
                 {person.userId !== session.user.id && (
                   <audio ref={el => { if (el) { remoteAudioRefs.current.set(person.userId, el); const s = remoteStreamsRef.current.get(person.userId); if (s && el.srcObject !== s) { el.srcObject = s; el.play().catch(() => {}); } } }} autoPlay playsInline style={{ width: 0, height: 0, position: 'absolute' }} />
                 )}
-              </div>
-            ))}
+              </div>;
+            })}
           </div>
         ) : (
           <div className="participants-empty">
@@ -1071,15 +1419,18 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
         <div className="chat-drawer-header">
           <div className="chat-drawer-title">
             <span className="chat-eyebrow">
-              {recording.status === 'RECORDING' ? '🔴 Đang ghi' : recordingsList.length > 0 ? `🎵 ${recordingsList.length} bản ghi` : '💬 Chat'}
+              {recording.status === 'RECORDING' ? `🔴 Đang ghi · ${duration(recordingElapsed)}` : recordingsList.length > 0 ? `🎵 ${recordingsList.length} bản ghi` : '💬 Chat'}
             </span>
             <h3>Hội thoại</h3>
           </div>
           <div className="chat-drawer-actions">
+            {isLearner && (
+              <button className="super-chat-button" onClick={() => { setGiftError(""); setSuperChatOpen(true); }}>💎 Super Chat</button>
+            )}
             {recordingsList.map(r => (
               <audio key={r.id} src={r.url} controls style={{ height: 26, borderRadius: 4, maxWidth: 100 }} />
             ))}
-            {joined && !showBrowser && (
+            {joined && !showBrowser && canRecord && (
               <button
                 className={recording.status === 'RECORDING' ? 'selected record-btn' : 'record-btn'}
                 onClick={toggleRecording}
@@ -1112,10 +1463,13 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
               ) : (
                 messages.map(msg => {
                   const isOwn = msg.userId === session.user.id;
+                  const isSuperChat = msg.kind === "SUPER_CHAT";
                   return (
-                    <div key={msg.id} className={`chat-msg${isOwn ? " own" : " other"}`}>
-                      {!isOwn && <small className="chat-msg-author">{msg.displayName}</small>}
+                    <div key={msg.id} className={`chat-msg${isOwn ? " own" : " other"}${isSuperChat ? " super-chat" : ""}`}>
+                      {isSuperChat && <div className="super-chat-heading"><span>💎 Super Chat</span><strong>{money(msg.amount || 0)}</strong></div>}
+                      {(!isOwn || isSuperChat) && <small className="chat-msg-author">{msg.displayName}</small>}
                       <p className="chat-msg-text">{msg.message}</p>
+                      {isSuperChat && <small className="super-chat-recipient">Gửi đến {msg.toDisplayName}</small>}
                       <small className="chat-msg-time">
                         {new Date(msg.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
                       </small>
@@ -1158,13 +1512,17 @@ function RoomView({ session, onCreateRoom }: { session: Session; onCreateRoom?: 
           <span className="ctrl-icon">📡</span>
           <span className="ctrl-label">Ping</span>
         </button>
-        <button className={`ctrl-btn${recording.status === 'RECORDING' ? " recording" : ""}`} onClick={toggleRecording}>
+        {canRecord && <button className={`ctrl-btn${recording.status === 'RECORDING' ? " recording" : ""}`} onClick={toggleRecording}>
           <span className="ctrl-icon">{recording.status === 'RECORDING' ? '⏹' : '⏺'}</span>
           <span className="ctrl-label">{recording.status === 'RECORDING' ? 'Dừng' : 'Ghi âm'}</span>
-        </button>
+        </button>}
         <button className={`ctrl-btn chat-toggle${chatOpen ? " active" : ""}`} onClick={() => setChatOpen(v => !v)}>
           <span className="ctrl-icon">💬</span>
           <span className="ctrl-label">Chat</span>
+        </button>
+        <button className="ctrl-btn leave" onClick={confirmLeaveRoom}>
+          <span className="ctrl-icon">↪</span>
+          <span className="ctrl-label">Thoát phòng</span>
         </button>
       </footer>
     )}
