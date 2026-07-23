@@ -88,7 +88,9 @@ test("keeps web contracts and proxy boundaries explicit", async () => {
   assert.match(page, /\/api\/rooms\/\$\{encodeURIComponent\(roomId\)\}\/documents/);
   assert.match(page, /setMessages\(current => \[\.\.\.history\.messages/);
   assert.match(page, /maxLength=\{MAX_CHAT_MESSAGE_LENGTH\}/);
-  assert.match(page, /className="documents-drawer"/);
+  assert.match(page, /className=\{`documents-drawer/);
+  assert.match(page, /aria-expanded=\{documentsOpen\}/);
+  assert.match(page, /Đóng khu vực tài liệu/);
   assert.match(page, /Chưa có PRO hoặc SUPER trong phòng/);
   assert.match(page, /context\.createAnalyser\(\)/);
   assert.match(page, /speakingUsers\.has\(person\.userId\)/);

@@ -794,6 +794,7 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
   const [giftSending, setGiftSending] = useState(false);
   const [giftError, setGiftError] = useState("");
   const [documentSending, setDocumentSending] = useState(false);
+  const [documentsOpen, setDocumentsOpen] = useState(true);
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(() => new Set());
 
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -1631,13 +1632,15 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
         )}
       </aside>
 
-      <aside className="documents-drawer" aria-label="Tài liệu phòng học">
-        <div className="room-documents-header"><strong>📎 Tài liệu <span>{documents.length}</span></strong>
-          {canRecord && <><button type="button" onClick={() => documentInputRef.current?.click()} disabled={documentSending} aria-label="Gửi tài liệu">{documentSending ? "Đang gửi…" : "＋ Gửi file"}</button><input ref={documentInputRef} className="document-input" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" onChange={sendDocument} /></>}
+      <aside className={`documents-drawer${documentsOpen ? " open" : ""}`} aria-label="Tài liệu phòng học">
+        <div className="room-documents-header">{documentsOpen && <strong>📎 Tài liệu <span>{documents.length}</span></strong>}<div>
+          {documentsOpen && canRecord && <><button type="button" onClick={() => documentInputRef.current?.click()} disabled={documentSending} aria-label="Gửi tài liệu">{documentSending ? "Đang gửi…" : "＋ Gửi file"}</button><input ref={documentInputRef} className="document-input" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" onChange={sendDocument} /></>}
+          <button type="button" className="documents-toggle" onClick={() => setDocumentsOpen(open => !open)} aria-expanded={documentsOpen} aria-label={documentsOpen ? "Đóng khu vực tài liệu" : "Mở khu vực tài liệu"} title={documentsOpen ? "Đóng tài liệu" : "Mở tài liệu"}>{documentsOpen ? "→" : "📎"}</button>
         </div>
-        {documents.length ? <div className="room-document-list">{documents.map(document => <a key={document.id} className="chat-document" href={realtimeAssetUrl(document.documentUrl || "")} target="_blank" rel="noreferrer" download={document.documentName}>
+        </div>
+        {documentsOpen && (documents.length ? <div className="room-document-list">{documents.map(document => <a key={document.id} className="chat-document" href={realtimeAssetUrl(document.documentUrl || "")} target="_blank" rel="noreferrer" download={document.documentName}>
           <span aria-hidden="true">📄</span><span><strong>{document.documentName}</strong><small>{readableFileSize(document.documentSize)} · {document.displayName}</small></span><b aria-hidden="true">↓</b>
-        </a>)}</div> : <small className="room-documents-empty">Chưa có tài liệu trong phòng</small>}
+        </a>)}</div> : <small className="room-documents-empty">Chưa có tài liệu trong phòng</small>)}
       </aside>
     </div>
 
