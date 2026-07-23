@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Route =
   | "/login"
@@ -50,10 +50,13 @@ type ChatMessage = {
   displayName: string;
   message: string;
   createdAt: string;
-  kind?: "CHAT" | "SUPER_CHAT";
+  kind?: "CHAT" | "SUPER_CHAT" | "DOCUMENT";
   amount?: number;
   toUserId?: string;
   toDisplayName?: string;
+  documentName?: string;
+  documentUrl?: string;
+  documentSize?: number;
 };
 type RecordingState = {
   status: 'RECORDING' | 'SAVED' | 'NONE' | 'ERROR';
@@ -79,12 +82,21 @@ declare global {
 }
 
 const SESSION_KEY = "lucy_session";
+const ACTIVE_ROOM_KEY = "lucy_active_room";
 const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL || "http://localhost:3020";
 const SPEAKING_THRESHOLD = 0.035;
 const SPEAKING_HOLD_FRAMES = 8;
-const playableAudioUrl = (storageUri: string) => /^https?:\/\//i.test(storageUri)
-  ? storageUri
-  : storageUri.startsWith("/") ? `${REALTIME_URL.replace(/\/$/, "")}${storageUri}` : "";
+const MAX_CHAT_MESSAGE_LENGTH = 500;
+const MAX_LIVE_CHAT_MESSAGES = 200;
+const MAX_JOIN_RETRIES = 3;
+const JOIN_ACK_TIMEOUT_MS = 5000;
+const realtimeAssetUrl = (uri: string) => /^https?:\/\//i.test(uri)
+  ? uri
+  : uri.startsWith("/") ? `${REALTIME_URL.replace(/\/$/, "")}${uri}` : "";
+const playableAudioUrl = realtimeAssetUrl;
+const readableFileSize = (bytes = 0) => bytes >= 1024 * 1024
+  ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  : bytes >= 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${bytes} B`;
 const audioFileDuration = (file: File) => new Promise<number>((resolve, reject) => {
   const url = URL.createObjectURL(file);
   const audio = new Audio(url);
@@ -135,7 +147,7 @@ async function api<T>(
 }
 
 async function realtimeApi<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`http://localhost:3020${path}`, {
+  const response = await fetch(`${REALTIME_URL}${path}`, {
     ...options,
     headers: {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
@@ -183,6 +195,7 @@ export default function LucyPage() {
 
   const logout = useCallback(() => {
     localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(ACTIVE_ROOM_KEY);
     setSession(null);
     navigate("/login");
   }, []);
@@ -344,9 +357,9 @@ function AppShell({ route, session, logout, children }: { route: Route; session:
       <nav aria-label="Điều hướng chính">{nav.map(([href, icon, label]) => <a key={href} href={`#${href}`} className={route === href ? "active" : ""}><span>{icon}</span>{label}</a>)}</nav>
       <div className="side-user"><span className="avatar">{session.user.displayName?.[0]?.toUpperCase() || "U"}</span><div><b>{session.user.displayName}</b><small>{session.user.role}</small></div><button onClick={logout} aria-label="Đăng xuất" title="Đăng xuất">↪</button></div>
     </aside>
-    <main className="main-area">
+    <main className={`main-area${route === "/room" ? " room-main-area" : ""}`}>
       <header className="topbar"><div><small>LUCY · Phase 5</small><h1>{nav.find(([href]) => href === route)?.[2] || "Trang chủ"}</h1></div><span className="role-pill">{session.user.role}</span></header>
-      <div className="content">{children}</div>
+      <div className={`content${route === "/room" ? " room-content" : ""}`}>{children}</div>
     </main>
     <nav className="bottom-nav" aria-label="Điều hướng mobile">{nav.map(([href, icon, label]) => <a key={href} href={`#${href}`} className={route === href ? "active" : ""}><span>{icon}</span><small>{label}</small></a>)}</nav>
   </div>;
@@ -762,6 +775,8 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [joined, setJoined] = useState(false);
+  const [joining, setJoining] = useState(false);
+  const [retryRoomId, setRetryRoomId] = useState("");
   const [roomId, setRoomId] = useState("");
   const [room, setRoom] = useState<Room | null>(null);
   const [showBrowser, setShowBrowser] = useState(true);
@@ -770,6 +785,7 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
   const [latency, setLatency] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [documents, setDocuments] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [recording, setRecording] = useState<RecordingState>({ status: 'NONE' });
   const [remoteUsers, setRemoteUsers] = useState<{ userId: string; displayName: string }[]>([]);
@@ -777,6 +793,7 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
   const [superChatOpen, setSuperChatOpen] = useState(false);
   const [giftSending, setGiftSending] = useState(false);
   const [giftError, setGiftError] = useState("");
+  const [documentSending, setDocumentSending] = useState(false);
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(() => new Set());
 
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -784,6 +801,13 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
   const pendingIceRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const remoteStreamsRef = useRef<Map<string, MediaStream>>(new Map());
   const remoteAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const documentInputRef = useRef<HTMLInputElement | null>(null);
+  const joinedRef = useRef(false);
+  const joiningRef = useRef(false);
+  const retryCountRef = useRef(0);
+  const retryTimerRef = useRef<number | null>(null);
+  const joinAckTimerRef = useRef<number | null>(null);
+  const joinRequestRef = useRef(0);
   const speakingContextRef = useRef<AudioContext | null>(null);
   const speakingMonitorsRef = useRef<Map<string, { source: MediaStreamAudioSourceNode; frame: number }>>(new Map());
 
@@ -853,10 +877,21 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
       liveSocket.on("connect", async () => {
         setConnected(true);
         setError("");
+        const savedRoom = localStorage.getItem(ACTIVE_ROOM_KEY);
+        if (savedRoom && !joinedRef.current) {
+          setRetryRoomId(savedRoom);
+          joinRoom(savedRoom);
+        }
       });
       liveSocket.on("disconnect", () => {
         setConnected(false);
         setJoined(false);
+        joinedRef.current = false;
+        joiningRef.current = false;
+        joinRequestRef.current += 1;
+        if (joinAckTimerRef.current) window.clearTimeout(joinAckTimerRef.current);
+        joinAckTimerRef.current = null;
+        setJoining(false);
         stopLocalStream();
         peerConnectionsRef.current.forEach(pc => pc.close());
         peerConnectionsRef.current.clear();
@@ -867,10 +902,14 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
         setMic(false);
         setRemoteUsers([]);
       });
-      liveSocket.on("connect_error", () => setError("Không thể kết nối Realtime service"));
+      liveSocket.on("connect_error", () => {
+        setRetryRoomId(localStorage.getItem(ACTIVE_ROOM_KEY) || "");
+        setError("Không thể kết nối Realtime service");
+      });
       liveSocket.on("room:state", (state: Room) => setRoom(state));
       liveSocket.on("chat:message", (msg: ChatMessage) => {
-        setMessages(prev => [...prev, msg]);
+        if (msg.kind === "DOCUMENT") setDocuments(current => [msg, ...current.filter(document => document.id !== msg.id)].slice(0, 100));
+        else setMessages(prev => [...prev, msg].slice(-MAX_LIVE_CHAT_MESSAGES));
       });
       liveSocket.on("recording:update", (state: RecordingState) => {
         if (state.status === 'RECORDING') {
@@ -916,6 +955,8 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
       localStreamRef.current = null;
       peerConnectionsRef.current.forEach(pc => pc.close());
       stopAllSpeakingMonitors(false);
+      if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
+      if (joinAckTimerRef.current) window.clearTimeout(joinAckTimerRef.current);
       liveSocket?.off();
       liveSocket?.disconnect();
     };
@@ -964,12 +1005,35 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
     if (!s || !chatInput.trim() || !joined) return;
     s.emit("chat:send", {
       roomId,
-      userId: session.user.id,
-      displayName: session.user.displayName,
       message: chatInput.trim(),
-    }, (result: { ok: boolean }) => {
-      if (result?.ok) setChatInput("");
+    }, (result: { ok: boolean; message?: string }) => {
+      if (result?.ok) setChatInput(""); else setError(result?.message || "Không thể gửi tin nhắn");
     });
+  }
+
+  async function sendDocument(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file || !joined || !canRecord) return;
+    if (file.size > 20 * 1024 * 1024) { setError("Tài liệu không được vượt quá 20 MB"); input.value = ""; return; }
+    setDocumentSending(true); setError("");
+    try {
+      const payload = new FormData();
+      payload.append("document", file);
+      payload.append("userId", session.user.id);
+      const response = await fetch(`${REALTIME_URL}/api/rooms/${encodeURIComponent(roomId)}/documents`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.token}` },
+        body: payload,
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(body?.message || `Không thể gửi tài liệu (${response.status})`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Không thể gửi tài liệu");
+    } finally {
+      input.value = "";
+      setDocumentSending(false);
+    }
   }
 
   function leaveRoom() {
@@ -983,6 +1047,15 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
     }
     s.emit("room:leave", { roomId }, (result: { ok: boolean; message?: string }) => {
       if (!result?.ok) { setError(result?.message || "Không thể thoát phòng"); return; }
+      localStorage.removeItem(ACTIVE_ROOM_KEY);
+      joinedRef.current = false;
+      joiningRef.current = false;
+      joinRequestRef.current += 1;
+      retryCountRef.current = 0;
+      if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
+      if (joinAckTimerRef.current) window.clearTimeout(joinAckTimerRef.current);
+      retryTimerRef.current = null;
+      joinAckTimerRef.current = null;
       stopLocalStream();
       peerConnectionsRef.current.forEach(pc => pc.close());
       peerConnectionsRef.current.clear();
@@ -991,9 +1064,12 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
       remoteAudioRefs.current.clear();
       stopAllSpeakingMonitors();
       setJoined(false);
+      setJoining(false);
+      setRetryRoomId("");
       setRoomId("");
       setRoom(null);
       setMessages([]);
+      setDocuments([]);
       setMic(false);
       setHand(false);
       setLatency(null);
@@ -1262,23 +1338,73 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
     }
   }
 
-  function joinRoom(code: string) {
-    const s = socketRef.current || socket;
-    if (!s || !code.trim() || joined) return;
-    setRoomId(code);
-    if (!s.connected) {
-      setError("Chưa kết nối được server. Vui lòng đợi hoặc refresh.");
+  function scheduleJoinRetry(code: string, reason: string) {
+    joiningRef.current = false;
+    setJoining(false);
+    setRetryRoomId(code);
+    if (retryCountRef.current >= MAX_JOIN_RETRIES) {
+      setError(`${reason}. Không thể tự tham gia lại sau ${MAX_JOIN_RETRIES} lần.`);
       return;
     }
-    s.emit("room:join", { roomId: code, userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
-      if (!result?.ok) { setError(result?.message || "Không thể tham gia phòng"); return; }
+    const attempt = ++retryCountRef.current;
+    const delay = 2 ** (attempt - 1) * 1000;
+    setError(`${reason}. Đang thử lại ${attempt}/${MAX_JOIN_RETRIES}…`);
+    if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = window.setTimeout(() => {
+      retryTimerRef.current = null;
+      joinRoom(code, true);
+    }, delay);
+  }
+
+  function joinRoom(code: string, isRetry = false) {
+    const target = code.trim();
+    if (!target || joinedRef.current || joiningRef.current) return;
+    if (!isRetry) retryCountRef.current = 0;
+    if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = null;
+    setRoomId(target);
+    setRetryRoomId(target);
+    const s = socketRef.current || socket;
+    if (!s?.connected) { scheduleJoinRetry(target, "Chưa kết nối được server"); return; }
+    joiningRef.current = true;
+    setJoining(true);
+    setError("");
+    const requestId = ++joinRequestRef.current;
+    if (joinAckTimerRef.current) window.clearTimeout(joinAckTimerRef.current);
+    joinAckTimerRef.current = window.setTimeout(() => {
+      if (joinRequestRef.current !== requestId || joinedRef.current) return;
+      joinAckTimerRef.current = null;
+      joinRequestRef.current += 1;
+      scheduleJoinRetry(target, "Server không phản hồi yêu cầu tham gia");
+    }, JOIN_ACK_TIMEOUT_MS);
+    s.emit("room:join", { roomId: target, userId: session.user.id, displayName: session.user.displayName, role: session.user.role }, async (result: { ok: boolean; room?: Room; message?: string }) => {
+      if (joinRequestRef.current !== requestId) return;
+      if (joinAckTimerRef.current) window.clearTimeout(joinAckTimerRef.current);
+      joinAckTimerRef.current = null;
+      if (!result?.ok) { scheduleJoinRetry(target, result?.message || "Không thể tham gia phòng"); return; }
+      joinedRef.current = true;
+      joiningRef.current = false;
+      retryCountRef.current = 0;
+      if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+      localStorage.setItem(ACTIVE_ROOM_KEY, target);
       setJoined(true);
+      setJoining(false);
+      setRetryRoomId("");
       setShowBrowser(false);
       if (result.room) setRoom(result.room);
+      try {
+        const [history, files] = await Promise.all([
+          realtimeApi<{ messages: ChatMessage[] }>(`/rooms/${encodeURIComponent(target)}/messages?limit=${MAX_LIVE_CHAT_MESSAGES}`),
+          realtimeApi<{ documents: ChatMessage[] }>(`/rooms/${encodeURIComponent(target)}/documents`),
+        ]);
+        setMessages(current => [...history.messages, ...current.filter(message => !history.messages.some(saved => saved.id === message.id))]);
+        setDocuments(current => [...files.documents, ...current.filter(document => !files.documents.some(saved => saved.id === document.id))].slice(0, 100));
+      } catch { setError("Không thể tải lịch sử chat"); }
       const stream = await startLocalStream();
       const micEnabled = Boolean(stream);
       setMic(micEnabled);
-      s.emit("mic:toggle", { roomId: code, enabled: micEnabled });
+      s.emit("mic:toggle", { roomId: target, enabled: micEnabled });
       setError(micEnabled ? "" : "Đã vào phòng ở chế độ chỉ nghe. Hãy cấp quyền microphone để bật voice.");
       if (!result.room?.users) return;
       const others = result.room.users.filter((u: { userId: string }) => u.userId !== session.user.id);
@@ -1291,12 +1417,24 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
     });
   }
 
+  function retryJoinNow() {
+    const target = retryRoomId || roomId || localStorage.getItem(ACTIVE_ROOM_KEY) || "";
+    retryCountRef.current = 0;
+    joiningRef.current = false;
+    setJoining(false);
+    joinRoom(target);
+  }
+
   useEffect(() => {
     (window as any).__lucyJoinRoom = (code: string) => {
       if (socketRef.current?.connected) joinRoom(code);
     };
     return () => { delete (window as any).__lucyJoinRoom; };
   }, []);
+
+  useEffect(() => {
+    if (joined && roomId) localStorage.setItem(ACTIVE_ROOM_KEY, roomId);
+  }, [joined, roomId]);
 
   if (compact) {
     if (!joined) return null;
@@ -1318,7 +1456,7 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
   }
 
   if (showBrowser) {
-    return <RoomBrowser session={session} onJoin={joinRoom} connected={connected} onCreateRoom={onCreateRoom} />;
+    return <>{retryRoomId && <div className="room-retry-banner" role="status"><span>{joining ? `Đang tham gia lại phòng ${retryRoomId}…` : error || `Chưa thể vào phòng ${retryRoomId}`}</span><button onClick={retryJoinNow} disabled={joining}>Thử lại ngay</button></div>}<RoomBrowser session={session} onJoin={joinRoom} connected={connected} onCreateRoom={onCreateRoom} /></>;
   }
 
   return <div className="room-view">
@@ -1348,6 +1486,7 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
     {error && (
       <div className="room-error-banner">
         <p className="error" role="alert">{error}</p>
+        {retryRoomId && !joined && <button onClick={retryJoinNow} disabled={joining}>{joining ? "Đang thử…" : "Thử lại ngay"}</button>}
       </div>
     )}
 
@@ -1480,11 +1619,7 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
               <div ref={el => el?.scrollIntoView({ behavior: 'smooth' })} />
             </div>
             <form onSubmit={sendChat} className="chat-form">
-              <input
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                placeholder="Nhập tin nhắn..."
-              />
+              <div className="chat-input-wrap"><input value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Nhập tin nhắn..." aria-label="Nhập tin nhắn" maxLength={MAX_CHAT_MESSAGE_LENGTH} /><small>{chatInput.length}/{MAX_CHAT_MESSAGE_LENGTH}</small></div>
               <button type="submit">Gửi</button>
             </form>
           </>
@@ -1494,6 +1629,15 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
             <p>Tham gia phòng để chat và ghi âm</p>
           </div>
         )}
+      </aside>
+
+      <aside className="documents-drawer" aria-label="Tài liệu phòng học">
+        <div className="room-documents-header"><strong>📎 Tài liệu <span>{documents.length}</span></strong>
+          {canRecord && <><button type="button" onClick={() => documentInputRef.current?.click()} disabled={documentSending} aria-label="Gửi tài liệu">{documentSending ? "Đang gửi…" : "＋ Gửi file"}</button><input ref={documentInputRef} className="document-input" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" onChange={sendDocument} /></>}
+        </div>
+        {documents.length ? <div className="room-document-list">{documents.map(document => <a key={document.id} className="chat-document" href={realtimeAssetUrl(document.documentUrl || "")} target="_blank" rel="noreferrer" download={document.documentName}>
+          <span aria-hidden="true">📄</span><span><strong>{document.documentName}</strong><small>{readableFileSize(document.documentSize)} · {document.displayName}</small></span><b aria-hidden="true">↓</b>
+        </a>)}</div> : <small className="room-documents-empty">Chưa có tài liệu trong phòng</small>}
       </aside>
     </div>
 
