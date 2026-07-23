@@ -76,17 +76,17 @@
 <div class="grid">
   <a class="card" href="auth-service-diagram.html">
     <h3>Auth Service</h3>
-    <p>Register, login, JWT, role-based access. AuthController, PasswordHasher, JwtHandler, MariaDB.</p>
+    <p>Register, login, JWT HS256, ASP.NET Identity PasswordHasher và MariaDB.</p>
     <span class="badge">.NET 10 :5000</span>
   </a>
   <a class="card" href="wallet-service-diagram.html">
     <h3>Wallet Service</h3>
-    <p>Wallet management, top-up, real-time gift, podcast. WalletController, Transaction Manager, MariaDB.</p>
-    <span class="badge">.NET 10 :5040</span>
+    <p>Wallet, top-up transaction, Super Chat có JWT và CRUD podcast.</p>
+    <span class="badge">.NET 10 :5041</span>
   </a>
   <a class="card" href="realtime-service-diagram.html">
     <h3>Realtime Service</h3>
-    <p>Socket.IO, voice rooms, raise hand, mic toggle, latency ping. Express Router, Room Manager, MariaDB.</p>
+    <p>Socket.IO room, chat, tài liệu, recording, Super Chat, WebRTC và MariaDB.</p>
     <span class="badge">Node.js :3020</span>
   </a>
   <a class="card" href="lms-service-diagram.html">
@@ -96,7 +96,7 @@
   </a>
   <a class="card" href="system-flow.html">
     <h3>System Overview</h3>
-    <p>End-to-end flow across all 4 services. Auth → Wallet → Realtime → LMS → MariaDB.</p>
+    <p>Luồng hiện hành giữa web/Flutter, bốn service và database lucy_phase5 dùng chung.</p>
     <span class="badge">Architecture Overview</span>
   </a>
 </div>

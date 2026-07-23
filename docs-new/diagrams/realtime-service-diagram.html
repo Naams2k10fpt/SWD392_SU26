@@ -224,8 +224,8 @@
   <text class="elbl" data-e="e-express-room"  x="548" y="228" text-anchor="middle">ensureRoom()</text>
   <text class="elbl" data-e="e-socket-room"   x="420" y="305">Join room</text>
   <text class="elbl" data-e="e-socket-broad"  x="548" y="310" text-anchor="middle">Broadcast</text>
-  <text class="elbl" data-e="e-room-mgr"      x="895" y="228" text-anchor="middle">room_participants</text>
-  <text class="elbl" data-e="e-broad-db"      x="895" y="310" text-anchor="middle">room_events</text>
+  <text class="elbl" data-e="e-room-mgr"      x="895" y="228" text-anchor="middle">realtime_room_participants</text>
+  <text class="elbl" data-e="e-broad-db"      x="895" y="310" text-anchor="middle">room_messages</text>
   <text class="elbl" data-e="e-latency-db"    x="720" y="410" text-anchor="middle">Log ping</text>
 
   <!-- ── nodes: clients ────────────────────── -->
@@ -246,7 +246,7 @@
     <text class="t" x="330" y="228">Express Router</text>
     <text class="m" x="330" y="248">GET /health</text>
     <text class="m" x="330" y="262">GET /rooms</text>
-    <text class="m" x="330" y="274">POST /token</text>
+    <text class="m" x="330" y="274">POST /agora/token</text>
   </g>
   <g class="node do" data-k="socketio">
     <rect x="310" y="320" width="200" height="110"/>
@@ -272,10 +272,10 @@
   <!-- ── nodes: data stores ────────────────── -->
   <g class="node store" data-k="mariadb">
     <rect x="930" y="200" width="180" height="90"/>
-    <text class="t" x="950" y="230">MariaDB (lucy_realtime)</text>
-    <text class="m" x="950" y="252">room_participants</text>
-    <text class="m" x="950" y="268">room_events</text>
-    <text class="m" x="950" y="284">latency_logs</text>
+    <text class="t" x="950" y="230">MariaDB (lucy_phase5)</text>
+    <text class="m" x="950" y="252">realtime_room_participants</text>
+    <text class="m" x="950" y="268">room_messages</text>
+    <text class="m" x="950" y="284">realtime_latency_samples</text>
   </g>
   </g>
   </svg>
@@ -304,11 +304,11 @@
 const DETAIL = {
   browser1: { t: "Browser Tab 1", m: "User A", b: "Trình duyệt web của người dùng A. Kết nối tới Realtime Server qua Socket.IO để tham gia phòng và tương tác." },
   browser2: { t: "Browser Tab 2", m: "User B", b: "Trình duyệt web của người dùng B. Kết nối tới Realtime Server qua Socket.IO." },
-  express: { t: "Express Router", m: "HTTP REST Server", b: "Xử lý các route HTTP: <code>GET /health</code> (kiểm tra sức khỏe), <code>GET /rooms</code> (danh sách phòng), <code>POST /token</code> (tạo token kết nối)." },
+  express: { t: "Express Router", m: "HTTP REST Server", b: "Xử lý các route HTTP: <code>GET /health</code> (kiểm tra sức khỏe), <code>GET /rooms</code> (danh sách phòng), <code>POST /agora/token</code> (tạo token kết nối)." },
   socketio: { t: "Socket.IO Server", m: "WebSocket Server (Node.js 22)", b: "Xử lý kết nối WebSocket: <b>Vào phòng</b> — tham gia phòng học, <b>Giơ tay</b> — báo hiệu muốn nói, <b>Bật/Tắt mic</b> — chuyển đổi trạng thái mic, <b>Ping</b> — đo độ trễ mạng." },
-  room_mgr: { t: "Room Manager", m: "Room Manager", b: "Quản lý danh sách người tham gia trong mỗi phòng. Khi user vào/ra phòng, cập nhật bảng <code>room_participants</code> trong MariaDB." },
-  broadcaster: { t: "Event Broadcaster", m: "Event Broadcaster", b: "Nhận sự kiện từ Socket.IO server và phát sóng đến tất cả thành viên trong phòng. Ghi lại sự kiện vào bảng <code>room_events</code>." },
-  mariadb: { t: "MariaDB (lucy_realtime)", m: "Relational Database (Port 3306)", b: "MariaDB 12.2 lưu <code>room_participants</code> (user/phòng), <code>room_events</code> (lịch sử sự kiện), <code>latency_logs</code> (đo độ trễ)." }
+  room_mgr: { t: "Room Manager", m: "Room Manager", b: "Quản lý danh sách người tham gia trong mỗi phòng. Khi user vào/ra phòng, cập nhật bảng <code>realtime_room_participants</code> trong MariaDB." },
+  broadcaster: { t: "Event Broadcaster", m: "Socket.IO emit", b: "Phát room state, chat, recording và Super Chat đến thành viên trong phòng. Chat/tài liệu lưu ở <code>room_messages</code>; trạng thái participant lưu ở <code>realtime_room_participants</code>." },
+  mariadb: { t: "MariaDB (lucy_phase5)", m: "Relational Database (Port 3306)", b: "Lưu <code>realtime_rooms</code>, <code>realtime_room_participants</code>, <code>realtime_latency_samples</code>, <code>room_messages</code> và <code>recording_logs</code>." }
 };
 
 const FLOWS = {
@@ -319,7 +319,7 @@ const FLOWS = {
     steps: [
       "Người dùng A truy cập <code>GET /rooms</code> để lấy danh sách phòng.",
       "<code>Express Router</code> gọi <code>ensureRoom()</code> để đảm bảo phòng tồn tại.",
-      "<code>Room Manager</code> thêm người dùng vào <code>room_participants</code>.",
+      "<code>Room Manager</code> thêm người dùng vào <code>realtime_room_participants</code>.",
       "Kết nối Socket.IO được thiết lập, user có thể gửi/nhận sự kiện."
     ]
   },
@@ -329,9 +329,9 @@ const FLOWS = {
     nodes: ["browser2","socketio","broadcaster","mariadb"],
     steps: [
       "Người dùng B ấn nút 'Giơ tay' trên giao diện.",
-      "Socket.IO server nhận event <code>raise-hand</code> từ client.",
+      "Socket.IO server nhận event <code>hand:raise</code> từ client.",
       "<code>Event Broadcaster</code> phát sóng event đến tất cả thành viên trong phòng.",
-      "Sự kiện được ghi vào bảng <code>room_events</code> trong MariaDB."
+      "Trạng thái giơ tay được cập nhật trong <code>realtime_room_participants</code>."
     ]
   },
   mic: {
@@ -340,7 +340,7 @@ const FLOWS = {
     nodes: ["browser1","socketio","broadcaster","mariadb"],
     steps: [
       "Người dùng A bật/tắt micro trên giao diện.",
-      "Socket.IO server nhận event <code>mic-toggle</code>.",
+      "Socket.IO server nhận event <code>mic:toggle</code>.",
       "<code>Event Broadcaster</code> phát sóng trạng thái mic mới đến phòng.",
       "Các thành viên khác trong phòng nhận được thông báo cập nhật."
     ]
@@ -352,7 +352,7 @@ const FLOWS = {
     steps: [
       "Người dùng B gửi ping để đo độ trễ kết nối.",
       "Socket.IO server tính thời gian round-trip.",
-      "Kết quả ping được ghi vào bảng <code>latency_logs</code>.",
+      "Kết quả ping được ghi vào bảng <code>realtime_latency_samples</code>.",
       "Client hiển thị độ trễ hiện tại (ms)."
     ]
   }

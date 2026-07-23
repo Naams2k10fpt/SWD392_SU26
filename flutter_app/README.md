@@ -1,16 +1,16 @@
-# lucy_app
+# LUCY Flutter App
 
-A new Flutter project.
+Mobile client Flutter 3.10+ cho Auth, room Socket.IO, wallet, gift và podcast.
+Android Emulator dùng các URL host mặc định:
 
-## Getting Started
+- Auth: `http://10.0.2.2:5000`
+- Wallet: `http://10.0.2.2:5041`
+- Realtime: `http://10.0.2.2:3020`
 
-This project is a starting point for a Flutter application.
+```powershell
+flutter pub get
+flutter run
+```
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Web app hiện là client đầy đủ nhất cho password room, retry join, tài liệu,
+recording, Super Chat và CRUD podcast. Flutter vẫn là client Phase 5 cơ bản.

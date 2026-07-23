@@ -272,7 +272,7 @@
   <!-- ── zones ─────────────────────────────── -->
   <rect class="zone-rect" x="60" y="80" width="1380" height="260"/>
   <text class="ztitle" x="90" y="115">☰ Client Layer</text>
-  <text class="zsub" x="90" y="133">Flutter App · cURL · Swagger UI</text>
+  <text class="zsub" x="90" y="133">Web / Flutter App · cURL · Swagger UI</text>
 
   <rect class="zone-rect" x="30" y="400" width="1440" height="530"/>
   <text class="ztitle" x="60" y="435">⚙ Service Layer</text>
@@ -315,14 +315,14 @@
   <text class="elbl" data-e="e-realtime-db" x="840" y="800" text-anchor="end" transform="rotate(-90,840,800)">rooms · event logs</text>
   <text class="elbl" data-e="e-lms-db" x="1160" y="800" text-anchor="end" transform="rotate(-90,1160,800)">courses · lessons</text>
 
-  <text class="elbl" data-e="e-wallet-realtime" x="690" y="537" text-anchor="middle">broadcast (gift:sent…)</text>
+  <text class="elbl" data-e="e-wallet-realtime" x="690" y="537" text-anchor="middle">client announce after commit</text>
   <text class="elbl" data-e="e-wallet-auth" x="360" y="552" text-anchor="middle">validate JWT</text>
 
   <!-- ── nodes: Clients ────────────────────── -->
   <g class="node client" data-k="flutter_app">
     <rect class="node-bg" x="130" y="160" width="320" height="80"/>
     <text class="icon" x="150" y="210">📱</text>
-    <text class="t" x="185" y="200">Flutter App</text>
+    <text class="t" x="185" y="200">Web / Flutter App</text>
     <text class="m" x="185" y="220">Mobile client</text>
   </g>
 
@@ -346,7 +346,7 @@
     <rect class="node-bg" x="380" y="480" width="280" height="130"/>
     <text class="icon" x="400" y="530">💳</text>
     <text class="t" x="440" y="520">Wallet Service</text>
-    <text class="tag" x="440" y="540">.NET 10 · REST :5040 · /swagger</text>
+    <text class="tag" x="440" y="540">.NET 10 · REST :5041 · /swagger</text>
     <text class="m" x="440" y="565">Top-up · Gift · Pod</text>
   </g>
 
@@ -362,7 +362,7 @@
     <rect class="node-bg" x="1020" y="480" width="280" height="130"/>
     <text class="icon" x="1040" y="530">📚</text>
     <text class="t" x="1080" y="520">LMS</text>
-    <text class="tag" x="1080" y="540">Java 26 · Console</text>
+    <text class="tag" x="1080" y="540">Java 17 · Console</text>
     <text class="m" x="1080" y="565">State Pattern · Dashboard</text>
   </g>
 
@@ -371,7 +371,7 @@
     <rect class="node-bg" x="280" y="1000" width="840" height="90"/>
     <text class="icon" x="300" y="1055">🗄</text>
     <text class="t" x="340" y="1045">MariaDB 12.2</text>
-    <text class="tag" x="340" y="1065">lucy_phase4</text>
+    <text class="tag" x="340" y="1065">lucy_phase5</text>
     <text class="m" x="520" y="1055">users · wallets · rooms · courses — shared instance, logical separation</text>
   </g>
 
@@ -406,39 +406,39 @@
 <script>
 const DETAIL = {
   flutter_app: {
-    t: "Flutter App",
+    t: "Web / Flutter App",
     m: "Mobile Client",
-    b: "Ứng dụng di động Flutter kết nối tới <b>Auth Service (:5000)</b> qua REST để đăng nhập/đăng ký, và <b>Wallet Service (:5040)</b> để thao tác ví. Gửi JWT token trong header để xác thực."
+    b: "Ứng dụng di động Flutter kết nối tới <b>Auth Service (:5000)</b> qua REST để đăng nhập/đăng ký, và <b>Wallet Service (:5041)</b> để thao tác ví. Gửi JWT token trong header để xác thực."
   },
   curl_swagger: {
     t: "cURL / Swagger UI",
     m: "REST & WebSocket Client",
-    b: "Dùng <code>cURL</code> hoặc Swagger UI để test APIs. Kết nối HTTP tới Auth/Wallet services và WebSocket tới Realtime Audio (:3020). Swagger UI được serve bởi Wallet Service tại <code>:5040/swagger</code>."
+    b: "Dùng <code>cURL</code> hoặc Swagger UI để test APIs. Kết nối HTTP tới Auth/Wallet services và WebSocket tới Realtime Audio (:3020). Swagger UI được serve bởi Wallet Service tại <code>:5041/swagger</code>."
   },
   auth_svc: {
     t: "Auth Service",
     m: ".NET 10 · REST :5000",
-    b: "Xử lý đăng ký, đăng nhập, cấp JWT token. Dùng <code>PasswordHasher</code> (HMAC-SHA256) để hash mật khẩu và <code>JwtHandler</code> để tạo/xác thực token. Kết nối MariaDB để lưu users và roles."
+    b: "Xử lý đăng ký, đăng nhập và cấp JWT HS256. Mật khẩu được băm bằng ASP.NET Core Identity PasswordHasher (PBKDF2-based)."
   },
   wallet_svc: {
     t: "Wallet Service",
-    m: ".NET 10 · REST :5040 · /swagger",
-    b: "Quản lý ví người dùng, nạp tiền, tặng quà. Dùng <code>TransactionManager</code> cho giao dịch nguyên tử và <code>BalanceValidator</code> để ngăn thấu chi. Serve Swagger UI tại endpoint <code>/swagger</code>. Broadcast sự kiện giao dịch qua Realtime Service."
+    m: ".NET 10 · REST :5041 · /swagger",
+    b: "Quản lý ví, top-up, Super Chat và metadata podcast. Top-up/gift dùng MariaDB transaction; gift/podcast xác thực qua Auth Service. Swagger tại <code>/swagger</code>."
   },
   realtime_svc: {
     t: "Realtime Audio",
     m: "Node.js 22 · Socket.IO :3020",
-    b: "Socket.IO server cho phòng học tương tác. Xử lý join/leave phòng, giơ tay, bật/tắt mic, ping/pong. Tích hợp <b>Agora</b> cho WebRTC audio streaming. Lưu sự kiện phòng vào MariaDB."
+    b: "Socket.IO/Express cho phòng, chat, tài liệu, recording, Super Chat và WebRTC signaling. Protected upload/recording actions xác thực Bearer token qua Auth Service."
   },
   lms_svc: {
     t: "LMS",
-    m: "Java 26 · Console",
+    m: "Java 17 · Console",
     b: "Ứng dụng console với <b>State Pattern</b> cho quy trình học 4 giai đoạn: WarmUp → GuidedPractice → PeerExchange → Reflection. Mentor theo dõi tiến độ qua <code>MentorDashboard</code>. Dữ liệu khóa học lưu trong MariaDB."
   },
   mariadb: {
     t: "MariaDB 12.2",
-    m: "lucy_phase4 — Shared Instance",
-    b: "MariaDB 12.2 dùng chung cho tất cả services. Mỗi service chỉ thao tác trên tables thuộc domain của mình: <code>users/roles</code> (Auth), <code>wallet_accounts/transactions</code> (Wallet), <code>room_participants/events</code> (Realtime), <code>sessions/lessons</code> (LMS). Logical separation, single database per phase."
+    m: "lucy_phase5 — Shared Database",
+    b: "MariaDB dùng chung: <code>users/roles</code>, <code>wallet_accounts/gift_transactions</code>, <code>realtime_rooms/room_messages/recording_logs</code> và <code>mentor_material_pins/learner_progress</code>."
   }
 };
 
@@ -448,11 +448,11 @@ const FLOWS = {
     edges: ["e-flutter-auth", "e-auth-db"],
     nodes: ["flutter_app", "auth_svc", "mariadb"],
     steps: [
-      "Flutter App gửi request đăng nhập/đăng ký tới Auth Service (:5000).",
-      "Auth Service nhận request, hash password bằng HMAC-SHA256, kiểm tra thông tin.",
-      "Tạo JWT token (RSA 256) với claims: userId, roles, exp.",
+      "Web / Flutter App gửi request đăng nhập/đăng ký tới Auth Service (:5000).",
+      "Auth Service dùng ASP.NET Core Identity PasswordHasher để băm/kiểm tra mật khẩu.",
+      "Tạo JWT HS256 với claims: userId, email, role và exp.",
       "Lưu/Lấy thông tin user từ MariaDB — table <code>users</code> và <code>user_roles</code>.",
-      "JWT token trả về Flutter App qua response."
+      "JWT token trả về Web / Flutter App qua response."
     ]
   },
   wallet: {
@@ -460,11 +460,11 @@ const FLOWS = {
     edges: ["e-flutter-wallet", "e-wallet-db"],
     nodes: ["flutter_app", "wallet_svc", "mariadb"],
     steps: [
-      "Flutter App gửi request thao tác ví (xem số dư, nạp tiền, tặng quà) tới Wallet Service (:5040).",
-      "Wallet Service xác thực JWT token, kiểm tra X-User-Id header.",
-      "Xử lý giao dịch: <code>BalanceValidator</code> kiểm tra số dư, <code>TransactionManager</code> tạo giao dịch nguyên tử.",
+      "Client gửi request ví, top-up, Super Chat hoặc podcast tới Wallet Service (:5041).",
+      "Gift/podcast gửi Bearer JWT; wallet lookup và top-up hiện chưa yêu cầu auth.",
+      "Top-up/gift dùng MariaDB transaction và kiểm tra số dư trước commit.",
       "Ghi giao dịch vào MariaDB — table <code>wallet_accounts</code> và <code>gift_transactions</code>.",
-      "Kết quả trả về Flutter App; broadcast sự kiện qua Realtime Service nếu cần."
+      "Sau khi gift commit, client emit <code>gift:announce</code> sang Realtime Service."
     ]
   },
   realtime: {
@@ -473,10 +473,10 @@ const FLOWS = {
     nodes: ["curl_swagger", "realtime_svc", "mariadb"],
     steps: [
       "Client kết nối WebSocket tới Realtime Audio Server (:3020) qua Socket.IO.",
-      "Xác thực kết nối bằng JWT token gửi kèm handshake.",
-      "User tham gia phòng học: gửi/nhận sự kiện (giơ tay, bật/tắt mic, audio stream).",
+      "User gửi <code>room:join</code>; room join hiện tin identity payload và cần hardening trước production.",
+      "User gửi/nhận room state, chat, hand, mic, recording, gift và WebRTC signaling.",
       "Tích hợp Agora WebRTC cho truyền âm thanh chất lượng cao.",
-      "Sự kiện phòng được ghi vào MariaDB — table <code>room_participants</code> và <code>room_events</code>."
+      "MariaDB lưu participant, latency, chat/tài liệu và recording logs."
     ]
   },
   lms: {
@@ -487,7 +487,7 @@ const FLOWS = {
       "Mentor chạy LMS Console (Java) để quản lý buổi học.",
       "LMS khởi tạo state engine với State Pattern: 4 giai đoạn.",
       "WarmUp → GuidedPractice → PeerExchange → Reflection — mỗi giai đoạn có behavior riêng.",
-      "Mỗi bước chuyển state được ghi vào MariaDB — table <code>sessions</code> và <code>session_state</code>.",
+      "Mỗi bước chuyển state cập nhật <code>learner_progress</code> và ghi <code>lms_transition_events</code>.",
       "Mentor theo dõi tiến độ qua <code>MentorDashboard</code> console."
     ]
   },
@@ -497,9 +497,9 @@ const FLOWS = {
     nodes: ["flutter_app", "curl_swagger", "auth_svc", "wallet_svc", "realtime_svc"],
     steps: [
       "Wallet Service xác thực JWT qua <b>Auth Service</b> để validate token.",
-      "Wallet Service broadcast sự kiện (gift:sent, topup:complete) tới <b>Realtime Audio</b>.",
+      "Sau khi Wallet commit gift, client yêu cầu <b>Realtime Audio</b> xác minh và broadcast <code>gift:announced</code>.",
       "Realtime Audio push sự kiện đến tất cả clients trong phòng qua WebSocket.",
-      "Flutter App và cURL/Swagger UI gọi REST APIs tới Auth và Wallet services.",
+      "Web / Flutter App và cURL/Swagger UI gọi REST APIs tới Auth và Wallet services.",
       "Các services giao tiếp đồng bộ (REST) và bất đồng bộ (WebSocket broadcast)."
     ]
   }

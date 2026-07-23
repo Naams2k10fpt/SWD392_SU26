@@ -2,10 +2,10 @@
 
 | **Tên dự án** | LUCY (Language Unity & Collaborative Youth) |
 |---|---|
-| **Phiên bản** | 1.1.0 |
+| **Phiên bản** | 1.2.0 |
 | **Ngày cập nhật** | 2026-07-23 |
 | **Loại tài liệu** | SRS |
-| **Công nghệ** | .NET 10, Node.js 22, Java 26, MariaDB 12, Flutter 3.27+ |
+| **Công nghệ** | .NET 10, Node.js 22, Java 17, MariaDB 12, Flutter 3.10+ |
 | **Chủ biên** | Nhóm SWD392 |
 
 ---
@@ -38,8 +38,8 @@ Hệ thống định nghĩa 3 actor chính:
 
 | Actor | Mô tả | Quyền hạn |
 |---|---|---|
-| **Anonymous (Learner)** | Người học | Vào phòng, chat, giơ tay, bật/tắt mic và gửi Super Chat cho PRO/SUPER cùng phòng |
-| **Pro (Mentor)** | Giáo viên hoặc người hướng dẫn | Quyền Learner + tạo phòng, gửi tài liệu, ghi âm và CRUD podcast |
+| **Anonymous (Learner)** | Người học | Tạo/tham gia phòng, chat, giơ tay, bật/tắt mic và gửi Super Chat cho PRO/SUPER cùng phòng |
+| **Pro (Mentor)** | Giáo viên hoặc người hướng dẫn | Quyền Learner + gửi tài liệu, ghi âm và CRUD podcast |
 | **Super (Creator)** | Người sáng tạo nội dung | Quyền Pro + nhận gift và quản lý nội dung |
 
 ### Role Hierarchy
@@ -50,7 +50,8 @@ Super (Creator)
        └── Anonymous
 ```
 
-Mỗi role kế thừa quyền của role dưới. Anonymous là role mặc định khi người dùng chưa đăng nhập hoặc mới đăng ký.
+Mỗi role kế thừa quyền của role dưới. `ANONYMOUS` là role learner mặc định;
+web app hiện yêu cầu đăng nhập trước khi dùng các màn hình chính.
 
 ---
 
@@ -61,11 +62,11 @@ Hệ thống gồm 4 backend service, web client và mobile client:
 | Service | Công nghệ | Port | Database | Mục đích |
 |---|---|---|---|---|
 | **Auth Service** | ASP.NET Core Minimal API (.NET 10) | 5000 | MariaDB (lucy_phaseX) | Đăng ký, đăng nhập, JWT |
-| **Wallet Service** | ASP.NET Core Minimal API + Swagger (.NET 10) | 5040 | MariaDB (lucy_phaseX) | Ví điện tử, nạp tiền, gift, podcast |
+| **Wallet Service** | ASP.NET Core Minimal API + Swagger (.NET 10) | 5041 | MariaDB (lucy_phaseX) | Ví điện tử, nạp tiền, gift, podcast |
 | **Realtime Service** | Express + Socket.IO (Node.js 22) | 3020 | MariaDB (lucy_phaseX) | Phòng audio real-time, Agora token |
-| **LMS Service** | Java Console + State Pattern (Java 26) | Console | MariaDB (lucy_phaseX) | Mentor dashboard, sub-level transition |
+| **LMS Service** | Java Console + State Pattern (Java 17) | Console | MariaDB (lucy_phaseX) | Mentor dashboard, sub-level transition |
 | **Web App** | React 19 + Vinext | 3000 | Gọi API backend | Giao diện chính hiện tại |
-| **Mobile App** | Flutter 3.27+ | — | Gọi API backend | Giao diện người dùng di động |
+| **Mobile App** | Flutter 3.10+ | — | Gọi API backend | Giao diện người dùng di động |
 
 Tất cả service dùng chung một MariaDB instance (port 3306) nhưng tách biệt database theo phase (lucy_phase1 đến lucy_phase5).
 
@@ -142,10 +143,12 @@ Tất cả service dùng chung một MariaDB instance (port 3306) nhưng tách b
 | NFR3 | Database transaction | MariaDB transaction cho top-up và gift | 4 |
 | NFR4 | API documentation | Swagger UI tại /swagger (Wallet Service) | 4 |
 | NFR5 | CORS | Realtime service cho phép CORS origin tùy chỉnh | 2 |
-| NFR6 | Security isolation | Identity (.NET) tách biệt với Realtime (Node.js) qua token | 4 |
+| NFR6 | Security isolation | Gift/podcast/recording/tài liệu xác thực JWT qua Auth; room join payload cần hardening trước production | 4 |
 | NFR7 | Stress test | k6 script với thresholds cụ thể | 5 |
 | NFR8 | Password hashing | ASP.NET Core Identity PasswordHasher | 1 |
 | NFR9 | Database charset | utf8mb4 + unicode_ci cho toàn bộ schema | 1 |
+| NFR10 | Room password | Password tùy chọn 4–100 ký tự, hash bằng scrypt và không trả hash qua API | 2 |
+| NFR11 | Upload limits | Tài liệu tối đa 20 MB; audio tối đa 50 MB với MIME allowlist | 2, 4 |
 
 ---
 
@@ -160,7 +163,7 @@ Tất cả service dùng chung một MariaDB instance (port 3306) nhưng tách b
 | POST | /auth/login | No | Đăng nhập, nhận JWT |
 | GET | /auth/me | Bearer JWT | Xem thông tin user hiện tại |
 
-### Wallet Service (port 5040)
+### Wallet Service (port 5041)
 
 | Method | Endpoint | Auth | Mô tả |
 |---|---|---|---|

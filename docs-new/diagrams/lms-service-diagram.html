@@ -188,7 +188,7 @@
   <g class="zone" id="z-console">
     <rect x="40" y="100" width="240" height="620"/>
     <text class="ztitle" x="60" y="130">Console</text>
-    <text class="zsub" x="60" y="148">Java Spring Boot App</text>
+    <text class="zsub" x="60" y="148">Java 17 Console</text>
   </g>
   <g class="zone" id="z-engine">
     <rect x="310" y="100" width="280" height="620"/>
@@ -226,8 +226,8 @@
   <text class="elbl" data-e="e-tut-guided"     x="410" y="400">Transition → PeerExchange</text>
   <text class="elbl" data-e="e-guided-peer"  x="410" y="450">Transition → Reflection</text>
   <text class="elbl" data-e="e-peer-reflect" x="410" y="500">Finish</text>
-  <text class="elbl" data-e="e-state-db"     x="720" y="400" text-anchor="middle">session_state</text>
-  <text class="elbl" data-e="e-dash-db"      x="865" y="232" text-anchor="middle">sessions</text>
+  <text class="elbl" data-e="e-state-db"     x="720" y="400" text-anchor="middle">lms_transition_events</text>
+  <text class="elbl" data-e="e-dash-db"      x="865" y="232" text-anchor="middle">mentor_material_pins</text>
   <text class="elbl" data-e="e-mentor-dash"  x="650" y="235">Mentor Dashboard</text>
   <text class="elbl" data-e="e-learner-track" x="650" y="305">Learner Tracker</text>
   <text class="elbl" data-e="e-tracker-db"   x="865" y="332" text-anchor="middle">learner_progress</text>
@@ -236,7 +236,7 @@
   <g class="node gate" data-k="lms_app">
     <rect x="60" y="170" width="200" height="60"/>
     <text class="t" x="80" y="198">LmsApplication</text>
-    <text class="m" x="80" y="216">Main · Spring Boot Console</text>
+    <text class="m" x="80" y="216">Main · Java 17 Console</text>
   </g>
 
   <!-- ── nodes: state engine ───────────────── -->
@@ -281,8 +281,8 @@
   <!-- ── nodes: data stores ────────────────── -->
   <g class="node store" data-k="mariadb">
     <rect x="950" y="200" width="180" height="90"/>
-    <text class="t" x="970" y="230">MariaDB (lucy_lms)</text>
-    <text class="m" x="970" y="252">sessions · session_state</text>
+    <text class="t" x="970" y="230">MariaDB (lucy_phase5)</text>
+    <text class="m" x="970" y="252">mentor_material_pins</text>
     <text class="m" x="970" y="270">learner_progress</text>
   </g>
   </g>
@@ -310,15 +310,15 @@
 </div>
 <script>
 const DETAIL = {
-  lms_app: { t: "LmsApplication", m: "Spring Boot Console App", b: "Ứng dụng console Java Spring Boot. Gọi <code>MentorDashboard.run()</code> để khởi tạo và hiển thị tiến độ học tập." },
-  stage_engine: { t: "StageTransitionEngine", m: "State Pattern Engine", b: "Máy trạng thái trung tâm. Khởi tạo các giai đoạn học tập: WarmUp → GuidedPractice → PeerExchange → Reflection. Dùng <code>SessionState</code> để theo dõi trạng thái từng session." },
+  lms_app: { t: "LmsApplication", m: "Java 17 Console App", b: "Ứng dụng Java console dùng JDBC. Tải <code>MentorDashboard</code>, chạy <code>refreshSummary()</code> và in tiến độ học tập." },
+  stage_engine: { t: "StageTransitionEngine", m: "State Pattern Engine", b: "Máy trạng thái trung tâm. Khởi tạo các giai đoạn học tập: WarmUp → GuidedPractice → PeerExchange → Reflection. Dùng <code>LearnerProgress</code> để theo dõi trạng thái từng session." },
   warmup: { t: "WarmUpState", m: "Stage 1", b: "Giai đoạn khởi động. Học viên làm quen với chủ đề và thiết lập mục tiêu cho buổi học." },
   guided: { t: "GuidedPracticeState", m: "Stage 2", b: "Giai đoạn thực hành có hướng dẫn. Mentor hướng dẫn học viên qua các bài tập thực hành." },
   peer: { t: "PeerExchangeState", m: "Stage 3", b: "Giai đoạn trao đổi bạn học. Học viên làm việc nhóm, chia sẻ kiến thức và giải quyết vấn đề cùng nhau." },
   reflect: { t: "ReflectionState", m: "Stage 4", b: "Giai đoạn suy ngẫm. Học viên tổng kết bài học, đánh giá và nhận phản hồi từ mentor." },
-  mentor_dash: { t: "MentorDashboard", m: "Mentor Dashboard", b: "Hiển thị tổng quan tiến độ của tất cả nhóm. Đọc dữ liệu từ bảng <code>sessions</code> và <code>session_state</code>." },
+  mentor_dash: { t: "MentorDashboard", m: "Mentor Dashboard", b: "Tải tài liệu ghim từ <code>mentor_material_pins</code> và tiến độ từ <code>learner_progress</code>, sau đó ghi transition vào <code>lms_transition_events</code>." },
   learner_tracker: { t: "Learner Tracker", m: "Learner Tracker", b: "Theo dõi tiến độ từng học viên qua các giai đoạn. Ghi nhận kết quả vào bảng <code>learner_progress</code>." },
-  mariadb: { t: "MariaDB (lucy_lms)", m: "Relational Database (Port 3306)", b: "MariaDB 12.2 lưu <code>sessions</code> (phiên học), <code>session_state</code> (trạng thái giai đoạn), <code>learner_progress</code> (tiến độ học viên)." }
+  mariadb: { t: "MariaDB (lucy_phase5)", m: "Relational Database (Port 3306)", b: "Lưu <code>mentor_material_pins</code>, <code>learner_progress</code> và <code>lms_transition_events</code>." }
 };
 
 const FLOWS = {
@@ -329,7 +329,7 @@ const FLOWS = {
     steps: [
       "<code>LmsApplication</code> gọi <code>runDashboard()</code> để khởi động.",
       "<code>StageTransitionEngine</code> khởi tạo các giai đoạn học tập.",
-      "<code>MentorDashboard</code> đọc sessions từ MariaDB để hiển thị.",
+      "<code>MentorDashboard</code> đọc mentor_material_pins từ MariaDB để hiển thị.",
       "<code>Learner Tracker</code> theo dõi tiến độ từng học viên.",
       "Dashboard hiển thị tổng quan cho mentor."
     ]
@@ -343,7 +343,7 @@ const FLOWS = {
       "Chuyển sang <code>GuidedPracticeState</code> — thực hành có hướng dẫn.",
       "Chuyển sang <code>PeerExchangeState</code> — trao đổi nhóm.",
       "Kết thúc với <code>ReflectionState</code> — tổng kết và đánh giá.",
-      "Mỗi bước chuyển đều được ghi vào <code>session_state</code> trong MariaDB."
+      "Mỗi bước chuyển đều được ghi vào <code>lms_transition_events</code> trong MariaDB."
     ]
   }
 };

@@ -25,8 +25,8 @@
 | **Auth API** | `phase4-rbl/dotnet-auth/Program.cs` | .NET 10 | Backend 1 | ✅ Hoàn thành |
 | **Wallet API** | `phase4-rbl/dotnet-wallet/Program.cs` | .NET 10 + Swagger | Backend 2 | ✅ Hoàn thành |
 | **Realtime Audio** | `phase4-rbl/realtime-audio/src/server.js` | Node.js 22 + Socket.IO | Backend 3 | ✅ Hoàn thành |
-| **Java LMS** | `phase4-rbl/java-lms/src/main/java/com/lucy/lms/*.java` | Java 26 + State Pattern | Backend 4 | ✅ Hoàn thành |
-| **Flutter App** | `flutter_app/lib/screens/*.dart` | Flutter 3.27+ | Mobile 1 | 🔄 Đang thực hiện |
+| **Java LMS** | `phase4-rbl/java-lms/src/main/java/com/lucy/lms/*.java` | Java 17 + State Pattern | Backend 4 | ✅ Hoàn thành |
+| **Flutter App** | `flutter_app/lib/screens/*.dart` | Flutter 3.10+ | Mobile 1 | 🔄 Đang thực hiện |
 | **Database** | `phase4-rbl/database/*.sql` | MariaDB 12 | Team | ✅ Hoàn thành |
 | **Stress Test** | `phase4-rbl/stress-tests/*.js` | k6 0.54+ | Team | 🔄 Phase 5 |
 

@@ -15,7 +15,7 @@ npm run dev
 Mặc định ứng dụng dùng:
 
 - Auth: `http://localhost:5000`
-- Wallet, gift và podcast: `http://localhost:5040`
+- Wallet, gift và podcast: `http://localhost:5041`
 - Realtime Socket.IO: `http://localhost:3020`
 
 Có thể thay đổi bằng `AUTH_BASE_URL`, `WALLET_BASE_URL` và

@@ -160,7 +160,7 @@
 <div class="bar">
   <div>
     <h1>Wallet Service — Architecture</h1>
-    <div class="sub">E-WALLET · .NET 10 :5040</div>
+    <div class="sub">E-WALLET · .NET 10 :5041</div>
   </div>
   <div class="spacer"></div>
   <div class="chips" id="chips">
@@ -193,7 +193,7 @@
   </g>
   <g class="zone" id="z-wallet">
     <rect x="290" y="100" width="240" height="620"/>
-    <text class="ztitle" x="310" y="130">Wallet API (.NET :5040)</text>
+    <text class="ztitle" x="310" y="130">Wallet API (.NET :5041)</text>
     <text class="zsub" x="310" y="148">Transaction processing</text>
   </g>
   <g class="zone" id="z-ledger">
@@ -246,10 +246,10 @@
   <!-- ── nodes: wallet api ─────────────────── -->
   <g class="node gate" data-k="wallet_ctrl">
     <rect x="310" y="200" width="200" height="80"/>
-    <text class="t" x="330" y="228">WalletController</text>
+    <text class="t" x="330" y="228">Minimal API endpoints</text>
     <text class="m" x="330" y="248">GET /wallets/{id}</text>
-    <text class="m" x="330" y="262">POST /wallets/top-up</text>
-    <text class="m" x="330" y="274">POST /wallets/gift</text>
+    <text class="m" x="330" y="262">POST /wallets/{id}/top-up</text>
+    <text class="m" x="330" y="274">POST /gifts</text>
   </g>
   <g class="node do" data-k="txn_mgr">
     <rect x="310" y="320" width="200" height="60"/>
@@ -282,7 +282,7 @@
   <!-- ── nodes: data stores ────────────────── -->
   <g class="node store" data-k="mariadb">
     <rect x="930" y="200" width="180" height="90"/>
-    <text class="t" x="950" y="230">MariaDB (lucy_wallet)</text>
+    <text class="t" x="950" y="230">MariaDB (lucy_phase5)</text>
     <text class="m" x="950" y="252">wallet_accounts</text>
     <text class="m" x="950" y="268">gift_transactions</text>
     <text class="m" x="950" y="284">podcast_recordings</text>
@@ -312,15 +312,15 @@
 </div>
 <script>
 const DETAIL = {
-  flutter_app: { t: "Flutter App", m: "Mobile App", b: "Ứng dụng di động Flutter. Xem số dư ví, nạp tiền, tặng quà cho người dùng khác." },
-  swagger_ui: { t: "Swagger UI", m: "API Documentation", b: "Giao diện Swagger để test API Wallet Service (cổng 5040) trong quá trình phát triển." },
-  wallet_ctrl: { t: "WalletController", m: "REST Controller (.NET 10)", b: "Xử lý các route ví: <code>GET /wallets/{id}</code> (xem số dư), <code>POST /wallets/top-up</code> (nạp tiền), <code>POST /wallets/gift</code> (gửi quà)." },
+  flutter_app: { t: "Web / Flutter App", m: "Client", b: "Client xem số dư, nạp tiền, gửi Super Chat và quản lý podcast qua Wallet API." },
+  swagger_ui: { t: "Swagger UI", m: "API Documentation", b: "Giao diện Swagger để test API Wallet Service (cổng 5041) trong quá trình phát triển." },
+  wallet_ctrl: { t: "Minimal API endpoints", m: "REST Controller (.NET 10)", b: "Xử lý các route ví: <code>GET /wallets/{id}</code> (xem số dư), <code>POST /wallets/{id}/top-up</code> (nạp tiền), <code>POST /gifts</code> (gửi quà)." },
   txn_mgr: { t: "Transaction Manager", m: "Transaction Manager", b: "Tạo giao dịch MariaDB nguyên tử. Mỗi lần nạp/rút đều được ghi lại với số tiền, loại, trạng thái, và thời gian." },
   balance_validator: { t: "Balance Validator", m: "Balance Checker", b: "Kiểm tra số dư trước mỗi giao dịch rút. Ngăn thấu chi bằng cách so sánh số dư hiện tại với số tiền giao dịch." },
   account_svc: { t: "Account Service", m: "Account Service", b: "Quản lý tài khoản ví: <code>getOrCreateWallet</code> tự động tạo ví nếu chưa có, lưu thông tin vào bảng <code>wallet_accounts</code>." },
-  gift_svc: { t: "Gift Service", m: "Gift Service", b: "Xử lý gửi quà giữa các user. Tạo bản ghi trong <code>gift_transactions</code> với người gửi, người nhận, và số tiền." },
-  podcast_svc: { t: "Podcast Service", m: "Podcast Service", b: "Quản lý bản ghi podcast. Lưu thông tin bản ghi vào bảng <code>podcast_recordings</code>." },
-  mariadb: { t: "MariaDB (lucy_wallet)", m: "Relational Database (Port 3306)", b: "MariaDB 12.2 lưu <code>wallet_accounts</code>, <code>gift_transactions</code>, <code>podcast_recordings</code>." }
+  gift_svc: { t: "Gift Service", m: "CanGift + InsertGift", b: "Xác thực ANONYMOUS sender, PRO/SUPER recipient và room khi có roomId; cập nhật hai ví trong một transaction. Lịch sử chỉ trả giao dịch user hiện tại gửi/nhận." },
+  podcast_svc: { t: "Podcast Service", m: "PRO/SUPER CRUD", b: "Tạo, liệt kê, đổi tên và xóa metadata trong <code>podcast_recordings</code>; upload/thay audio đi qua Realtime service." },
+  mariadb: { t: "MariaDB (lucy_phase5)", m: "Relational Database (Port 3306)", b: "MariaDB 12.2 lưu <code>wallet_accounts</code>, <code>gift_transactions</code>, <code>podcast_recordings</code>." }
 };
 
 const FLOWS = {
@@ -330,7 +330,7 @@ const FLOWS = {
     nodes: ["flutter_app","wallet_ctrl","txn_mgr","account_svc","mariadb"],
     steps: [
       "Người dùng yêu cầu nạp tiền từ Flutter App.",
-      "<code>WalletController</code> nhận <code>POST /wallets/nạp-tiền</code>.",
+      "<code>Minimal API endpoints</code> nhận <code>POST /wallets/{id}/top-up</code>.",
       "<code>Transaction Manager</code> tạo giao dịch nạp tiền nguyên tử.",
       "<code>Account Service</code> cập nhật số dư ví trong bảng <code>wallet_accounts</code>.",
       "Phản hồi thành công gửi về Flutter App."
@@ -341,8 +341,8 @@ const FLOWS = {
     edges: ["e-swagger-wallet","e-wallet-balance","e-wallet-gift","e-gift-db"],
     nodes: ["swagger_ui","wallet_ctrl","balance_validator","gift_svc","mariadb"],
     steps: [
-      "Người dùng gửi quà qua Swagger UI hoặc app.",
-      "<code>WalletController</code> nhận yêu cầu tặng quà.",
+      "ANONYMOUS gửi Super Chat kèm Bearer JWT.",
+      "<code>POST /gifts</code> xác thực sender và PRO/SUPER recipient.",
       "<code>Balance Validator</code> kiểm tra số dư đủ để tặng.",
       "<code>Gift Service</code> tạo bản ghi trong <code>gift_transactions</code>.",
       "Số dư người gửi bị trừ, người nhận được cộng tương ứng."
@@ -350,12 +350,11 @@ const FLOWS = {
   },
   podcast: {
     name: "Luồng Podcast",
-    edges: ["e-flutter-wallet","e-wallet-txn","e-wallet-podcast","e-podcast-db"],
-    nodes: ["flutter_app","wallet_ctrl","txn_mgr","podcast_svc","mariadb"],
+    edges: ["e-flutter-wallet","e-wallet-podcast","e-podcast-db"],
+    nodes: ["flutter_app","wallet_ctrl","podcast_svc","mariadb"],
     steps: [
-      "Người dùng tạo bản ghi podcast từ Flutter App.",
-      "<code>WalletController</code> xử lý tạo bản ghi mới.",
-      "<code>Transaction Manager</code> tạo giao dịch liên quan (nếu có phí).",
+      "PRO/SUPER gửi Bearer JWT và metadata podcast.",
+      "<code>POST /podcasts/recordings</code> xử lý tạo bản ghi mới.",
       "<code>Podcast Service</code> lưu thông tin vào <code>podcast_recordings</code>.",
       "Xác nhận hoàn tất gửi về client."
     ]

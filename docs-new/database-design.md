@@ -2,7 +2,7 @@
 
 | **Tên dự án** | LUCY (Language Unity & Collaborative Youth) |
 |---|---|
-| **Phiên bản** | 1.1.0 |
+| **Phiên bản** | 1.2.0 |
 | **Ngày cập nhật** | 2026-07-23 |
 | **Loại tài liệu** | Database Design |
 | **DBMS** | MariaDB 12.2 |

@@ -1,13 +1,15 @@
-# Phase 4 .NET Wallet and Monetization API
+# Phase 5 .NET Wallet and Monetization API
 
-ASP.NET Core Minimal API scaffold for RBL SWD392 Phase 4 SOA/microservices and monetization.
+ASP.NET Core Minimal API cho ví, Super Chat và podcast. Mặc định chạy tại
+`http://localhost:5041`; Swagger ở `/swagger`.
 
 ## Scope
 
 - Wallet balance lookup.
 - Top-up ledger concept.
-- Real-time gift transaction concept for Node Socket.IO broadcast after commit.
-- Podcast recording metadata endpoint for Super/Creator.
+- Super Chat của ANONYMOUS tới PRO/SUPER, xác thực JWT và broadcast sau commit.
+- Lịch sử quà chỉ trả giao dịch user hiện tại gửi hoặc nhận.
+- CRUD podcast cho PRO/SUPER.
 - Swagger-ready API through Swashbuckle.
 
 ## Run
@@ -28,7 +30,10 @@ Open Swagger at `/swagger` after the API starts.
 - `GET /gifts`
 - `POST /podcasts/recordings`
 - `GET /podcasts/recordings`
+- `PUT /podcasts/recordings/{id}`
+- `DELETE /podcasts/recordings/{id}`
 
 ## Scaffold boundaries
 
-This is not a production payment integration. Payment provider verification, idempotency keys, fraud controls, database transactions, and event outbox are intentionally listed as next hardening steps for the Phase 4 defense.
+Top-up và gift đã dùng MariaDB transaction. Production vẫn cần xác minh callback
+payment provider, idempotency key, fraud controls và event outbox.

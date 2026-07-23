@@ -2,17 +2,17 @@
 
 | **Tên dự án** | LUCY (Language Unity & Collaborative Youth) |
 |---|---|
-| **Phiên bản** | 1.1.0 |
+| **Phiên bản** | 1.2.0 |
 | **Ngày cập nhật** | 2026-07-23 |
 | **Loại tài liệu** | API Specification |
-| **Base URLs** | Auth: http://localhost:5000, Wallet: http://localhost:5040, Realtime: http://localhost:3020 |
+| **Base URLs** | Auth: http://localhost:5000, Wallet: http://localhost:5041, Realtime: http://localhost:3020 |
 
 ---
 
 ## Mục lục
 
 - [1. Auth Service (port 5000)](#1-auth-service-port-5000)
-- [2. Wallet Service (port 5040)](#2-wallet-service-port-5040)
+- [2. Wallet Service (port 5041)](#2-wallet-service-port-5041)
 - [3. Realtime Service (port 3020)](#3-realtime-service-port-3020)
 - [4. Java LMS (Console)](#4-java-lms-console)
 - [5. Error Codes](#5-error-codes)
@@ -155,11 +155,11 @@ Error responses:
 
 ---
 
-## 2. Wallet Service (port 5040)
+## 2. Wallet Service (port 5041)
 
 Công nghệ: ASP.NET Core Minimal API + Swagger (.NET 10)
-Base URL: `http://localhost:5040`
-Swagger UI: `http://localhost:5040/swagger`
+Base URL: `http://localhost:5041`
+Swagger UI: `http://localhost:5041/swagger`
 
 ### Endpoints
 
@@ -180,7 +180,7 @@ Swagger UI: `http://localhost:5040/swagger`
 #### GET /health — Health Check
 
 ```
-GET http://localhost:5040/health
+GET http://localhost:5041/health
 ```
 
 Response (200):
@@ -196,7 +196,7 @@ Response (200):
 #### GET /wallets/{userId} — Get Wallet
 
 ```
-GET http://localhost:5040/wallets/mentor-1
+GET http://localhost:5041/wallets/mentor-1
 ```
 
 Response (200):
@@ -215,7 +215,7 @@ Ghi chú: Nếu ví chưa tồn tại, tự động tạo ví mới với balanc
 #### POST /wallets/{userId}/top-up — Top-up
 
 ```
-POST http://localhost:5040/wallets/mentor-1/top-up
+POST http://localhost:5041/wallets/mentor-1/top-up
 Content-Type: application/json
 
 {
@@ -249,7 +249,7 @@ Error:
 #### POST /gifts — Send Gift
 
 ```
-POST http://localhost:5040/gifts
+POST http://localhost:5041/gifts
 Content-Type: application/json
 Authorization: Bearer <jwt>
 
@@ -289,7 +289,7 @@ Error:
 #### GET /gifts — List Gifts
 
 ```
-GET http://localhost:5040/gifts
+GET http://localhost:5041/gifts
 Authorization: Bearer <jwt>
 ```
 
@@ -305,7 +305,6 @@ Response (200):
     "toCreatorId": "creator-1",
     "amount": 50000,
     "message": "Cam on bai hoc hay!",
-    "realtimeEvent": "gift:sent",
     "createdAt": "2026-06-29T10:30:00Z"
   }
 ]
@@ -314,8 +313,9 @@ Response (200):
 #### POST /podcasts/recordings — Create Recording
 
 ```
-POST http://localhost:5040/podcasts/recordings
+POST http://localhost:5041/podcasts/recordings
 Content-Type: application/json
+Authorization: Bearer <jwt>
 
 {
   "creatorId": "creator-1",
@@ -343,7 +343,7 @@ Response (201):
 #### GET /podcasts/recordings — List Recordings
 
 ```
-GET http://localhost:5040/podcasts/recordings
+GET http://localhost:5041/podcasts/recordings
 ```
 
 Response (200):
@@ -514,7 +514,7 @@ Client                          Server
 
 ## 4. Java LMS (Console)
 
-Công nghệ: Java 26 + State Pattern
+Công nghệ: Java 17 + State Pattern
 Không có REST API. Chạy dưới dạng console application.
 
 | Command | Mô tả |
@@ -557,10 +557,11 @@ anon-level-4-demo (Anonymous Level 4)
 | Status | Ý nghĩa | Service |
 |---|---|---|
 | 200 | OK | Tất cả |
-| 201 | Created (Register, Create recording) | Auth, Wallet |
+| 201 | Created (register, gift, room, document hoặc recording) | Auth, Wallet, Realtime |
 | 400 | Bad Request (thiếu field, amount <= 0) | Auth, Wallet, Realtime |
-| 401 | Unauthorized (sai pass/email, token hết hạn) | Auth |
-| 404 | Not Found | Wallet |
+| 401 | Unauthorized (sai pass/email, thiếu hoặc token hết hạn) | Auth, Wallet |
+| 403 | Forbidden (sai role, identity không khớp hoặc chưa join room) | Wallet, Realtime |
+| 404 | Not Found | Wallet, Realtime |
 | 409 | Conflict (email đã tồn tại) | Auth |
 | 500 | Internal Server Error | Tất cả |
 
@@ -582,7 +583,7 @@ anon-level-4-demo (Anonymous Level 4)
 | POST /wallets/{userId}/top-up | amount | Must be positive (> 0) |
 | POST /rooms | password | Bỏ trống hoặc dài 4-100 ký tự; lưu dạng `scrypt` hash |
 | Socket `chat:send` | message | Sau trim phải dài 1-500 ký tự |
-| POST /gifts | amount | Must be positive (<= balance) |
+| POST /gifts | sender/recipient/room/amount | JWT là ANONYMOUS sender; recipient là PRO/SUPER cùng phòng; amount dương và không vượt balance |
 | POST /agora/token | channelName | Required |
 | POST /agora/token | uid | Required |
 
@@ -605,14 +606,14 @@ anon-level-4-demo (Anonymous Level 4)
 │          │ ◀──User Profile◀────────│  :5000   │
 │          │                          └──────────┘
 │          │
-│          │   3. Wallet API (no auth)┌──────────┐
-│          │ ──────────────────────▶  │  Wallet  │
+│          │   3. Wallet API           ┌──────────┐
+│          │ ──JWT cho gift/podcast─▶  │  Wallet  │
 │          │                          │ Service  │
-│          │ ◀──────────────────────  │  :5040   │
+│          │ ◀──────────────────────  │  :5041   │
 │          │     Wallet / Gift Data   └──────────┘
 │          │
 │          │   4. Realtime Socket     ┌──────────┐
-│          │ ──connect + token─────▶  │ Realtime │
+│          │ ──connect + room join──▶  │ Realtime │
 │          │                          │  :3020   │
 │          │ ◀──Socket.IO events◀───  └──────────┘
 └──────────┘

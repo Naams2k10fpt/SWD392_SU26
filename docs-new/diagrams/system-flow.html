@@ -223,16 +223,16 @@
 
   <!-- edge labels -->
   <text class="elbl" data-e="e-flutter-auth"     x="365" y="192">HTTP :5000</text>
-  <text class="elbl" data-e="e-flutter-wallet"   x="365" y="312">HTTP :5040</text>
+  <text class="elbl" data-e="e-flutter-wallet"   x="365" y="312">HTTP :5041</text>
   <text class="elbl" data-e="e-flutter-realtime" x="365" y="432">WS :3020</text>
   <text class="elbl" data-e="e-flutter-lms"      x="365" y="552">Console</text>
   <text class="elbl" data-e="e-gateway-auth"     x="655" y="192">POST /auth</text>
   <text class="elbl" data-e="e-gateway-wallet"   x="655" y="312">POST /wallet</text>
   <text class="elbl" data-e="e-gateway-realtime" x="655" y="432">Socket.IO</text>
-  <text class="elbl" data-e="e-auth-db"          x="1100" y="192" text-anchor="middle">lucy_phase1</text>
-  <text class="elbl" data-e="e-wallet-db"        x="1100" y="312" text-anchor="middle">lucy_wallet</text>
-  <text class="elbl" data-e="e-realtime-db"      x="1100" y="432" text-anchor="middle">lucy_realtime</text>
-  <text class="elbl" data-e="e-lms-db"           x="1100" y="552" text-anchor="middle">lucy_lms</text>
+  <text class="elbl" data-e="e-auth-db"          x="1100" y="192" text-anchor="middle">lucy_phase5</text>
+  <text class="elbl" data-e="e-wallet-db"        x="1100" y="312" text-anchor="middle">lucy_phase5</text>
+  <text class="elbl" data-e="e-realtime-db"      x="1100" y="432" text-anchor="middle">lucy_phase5</text>
+  <text class="elbl" data-e="e-lms-db"           x="1100" y="552" text-anchor="middle">lucy_phase5</text>
 
   <!-- ── nodes: clients ────────────────────── -->
   <g class="node" data-k="flutter_app">
@@ -248,18 +248,18 @@
   <g class="node" data-k="mentor_console">
     <rect x="60" y="530" width="260" height="60"/>
     <text class="t" x="80" y="558">Mentor Console</text>
-    <text class="m" x="80" y="576">Java Spring Boot (LMS)</text>
+    <text class="m" x="80" y="576">Java 17 Console (LMS)</text>
   </g>
 
   <!-- ── nodes: gateway ────────────────────── -->
   <g class="node gate" data-k="api_gateway">
     <rect x="390" y="200" width="220" height="350"/>
-    <text class="t" x="410" y="230">API Gateway</text>
-    <text class="m" x="410" y="252">JWT authentication</text>
-    <text class="m" x="410" y="272">Request routing</text>
-    <text class="m" x="410" y="292">Role check</text>
-    <text class="m" x="410" y="312">Rate limiting</text>
-    <text class="m" x="410" y="332">Forward X-User-Id</text>
+    <text class="t" x="410" y="230">Client / Web Proxy</text>
+    <text class="m" x="410" y="252">Same-origin Auth/Wallet proxy</text>
+    <text class="m" x="410" y="272">Forward Bearer token</text>
+    <text class="m" x="410" y="292">Realtime connects directly</text>
+    <text class="m" x="410" y="312">Flutter calls services directly</text>
+    <text class="m" x="410" y="332">No API Gateway service</text>
   </g>
 
   <!-- ── nodes: services ───────────────────── -->
@@ -270,7 +270,7 @@
   </g>
   <g class="node gate" data-k="wallet_svc">
     <rect x="680" y="290" width="220" height="70"/>
-    <text class="t" x="700" y="318">Wallet Service (.NET :5040)</text>
+    <text class="t" x="700" y="318">Wallet Service (.NET :5041)</text>
     <text class="m" x="700" y="338">Wallet · Top-up · Gift</text>
   </g>
   <g class="node gate" data-k="realtime_svc">
@@ -287,23 +287,23 @@
   <!-- ── nodes: stores ─────────────────────── -->
   <g class="node store" data-k="mariadb_phase1">
     <rect x="1290" y="170" width="540" height="60"/>
-    <text class="t" x="1310" y="198">MariaDB — lucy_phase1 (Auth)</text>
+    <text class="t" x="1310" y="198">MariaDB — lucy_phase5 (Auth)</text>
     <text class="m" x="1310" y="216">users · user_roles · roles</text>
   </g>
   <g class="node store" data-k="mariadb_wallet">
     <rect x="1290" y="290" width="540" height="60"/>
-    <text class="t" x="1310" y="318">MariaDB — lucy_wallet</text>
+    <text class="t" x="1310" y="318">MariaDB — lucy_phase5</text>
     <text class="m" x="1310" y="336">wallet_accounts · gift_transactions · podcast_recordings</text>
   </g>
   <g class="node store" data-k="mariadb_realtime">
     <rect x="1290" y="410" width="540" height="60"/>
-    <text class="t" x="1310" y="438">MariaDB — lucy_realtime</text>
-    <text class="m" x="1310" y="456">room_participants · room_events · latency_logs</text>
+    <text class="t" x="1310" y="438">MariaDB — lucy_phase5</text>
+    <text class="m" x="1310" y="456">realtime_room_participants · room_messages · recording_logs</text>
   </g>
   <g class="node store" data-k="mariadb_lms">
     <rect x="1290" y="530" width="540" height="60"/>
-    <text class="t" x="1310" y="558">MariaDB — lucy_lms</text>
-    <text class="m" x="1310" y="576">sessions · session_state · learner_progress</text>
+    <text class="t" x="1310" y="558">MariaDB — lucy_phase5</text>
+    <text class="m" x="1310" y="576">mentor_material_pins · learner_progress · lms_transition_events</text>
   </g>
   </g>
   </svg>
@@ -330,18 +330,18 @@
 </div>
 <script>
 const DETAIL = {
-  flutter_app: { t: "Flutter App", m: "Mobile App", b: "Ứng dụng di động Flutter kết nối tới tất cả services qua API Gateway. Gửi JWT token trong header để xác thực." },
+  flutter_app: { t: "Flutter App", m: "Mobile App", b: "Ứng dụng Flutter gọi trực tiếp các service; gửi Bearer JWT cho endpoint được bảo vệ." },
   web_client: { t: "Web / cURL / Postman", m: "REST & WebSocket Client", b: "Trình duyệt web và REST clients. Kết nối HTTP tới Auth/Wallet, WebSocket tới Realtime Service." },
-  mentor_console: { t: "Mentor Console", m: "Java Spring Boot Console", b: "Giao diện console cho mentor. Chạy <code>MentorDashboard</code> để xem tiến độ học tập." },
-  api_gateway: { t: "API Gateway", m: "Routing & Authentication", b: "Điểm vào trung tâm. Xác thực JWT (RSA 256), kiểm tra vai trò, rate limiting, chuyển tiếp <code>X-User-Id</code> và <code>X-User-Roles</code> đến services." },
-  auth_svc: { t: "Auth Service (.NET :5000)", m: "Auth Service", b: "Xử lý đăng ký, đăng nhập, cấp JWT. Dùng <code>PasswordHasher</code> (HMAC-SHA256) và <code>JwtHandler</code>. Lưu dữ liệu trong <code>lucy_phase1</code>." },
-  wallet_svc: { t: "Wallet Service (.NET :5040)", m: "Wallet Service", b: "Quản lý ví, nạp tiền, tặng quà. Dùng <code>Transaction Manager</code> cho giao dịch nguyên tử và <code>Balance Validator</code> để ngăn thấu chi." },
-  realtime_svc: { t: "Realtime Service (Node.js :3020)", m: "Realtime Service", b: "Socket.IO server cho phòng học tương tác. Xử lý vào phòng, giơ tay, bật/tắt mic, ping. Lưu sự kiện trong <code>lucy_realtime</code>." },
+  mentor_console: { t: "Mentor Console", m: "Java 17 Console", b: "Giao diện console cho mentor. Chạy <code>MentorDashboard</code> để xem tiến độ học tập." },
+  api_gateway: { t: "Client / Web Proxy", m: "Routing boundary", b: "Web app có same-origin proxy cho Auth/Wallet và forward Authorization header; Socket.IO kết nối trực tiếp tới :3020. Repo không có API Gateway riêng." },
+  auth_svc: { t: "Auth Service (.NET :5000)", m: "Auth Service", b: "Đăng ký, đăng nhập và cấp JWT HS256. Mật khẩu dùng ASP.NET Core Identity PasswordHasher (PBKDF2-based)." },
+  wallet_svc: { t: "Wallet Service (.NET :5041)", m: "Wallet Service", b: "Quản lý ví, nạp tiền, tặng quà. Dùng <code>Transaction Manager</code> cho giao dịch nguyên tử và <code>Balance Validator</code> để ngăn thấu chi." },
+  realtime_svc: { t: "Realtime Service (Node.js :3020)", m: "Realtime Service", b: "Socket.IO/Express xử lý phòng, chat, tài liệu, recording, Super Chat và WebRTC signaling; dùng database <code>lucy_phase5</code>." },
   lms_svc: { t: "LMS Service (Java Console)", m: "LMS Service", b: "Ứng dụng console với state pattern. Điều phối 4 giai đoạn: WarmUp → GuidedPractice → PeerExchange → Reflection." },
-  mariadb_phase1: { t: "MariaDB — lucy_phase1", m: "Auth Database (Port 3306)", b: "MariaDB 12.2 lưu <code>users</code>, <code>user_roles</code>, <code>roles</code>. Dùng cho xác thực và phân quyền." },
-  mariadb_wallet: { t: "MariaDB — lucy_wallet", m: "Wallet Database", b: "MariaDB 12.2 lưu <code>wallet_accounts</code>, <code>gift_transactions</code>, <code>podcast_recordings</code>." },
-  mariadb_realtime: { t: "MariaDB — lucy_realtime", m: "Realtime Database", b: "MariaDB 12.2 lưu <code>room_participants</code>, <code>room_events</code>, <code>latency_logs</code>." },
-  mariadb_lms: { t: "MariaDB — lucy_lms", m: "LMS Database", b: "MariaDB 12.2 lưu <code>sessions</code>, <code>session_state</code>, <code>learner_progress</code>." }
+  mariadb_phase1: { t: "MariaDB — lucy_phase5", m: "Auth Database (Port 3306)", b: "MariaDB 12.2 lưu <code>users</code>, <code>user_roles</code>, <code>roles</code>. Dùng cho xác thực và phân quyền." },
+  mariadb_wallet: { t: "MariaDB — lucy_phase5", m: "Wallet Database", b: "MariaDB 12.2 lưu <code>wallet_accounts</code>, <code>gift_transactions</code>, <code>podcast_recordings</code>." },
+  mariadb_realtime: { t: "MariaDB — lucy_phase5", m: "Realtime domain", b: "Lưu <code>realtime_rooms</code>, <code>realtime_room_participants</code>, <code>room_messages</code>, <code>recording_logs</code> và latency samples." },
+  mariadb_lms: { t: "MariaDB — lucy_phase5", m: "LMS domain", b: "Lưu <code>mentor_material_pins</code>, <code>learner_progress</code> và <code>lms_transition_events</code>." }
 };
 
 const FLOWS = {
@@ -351,10 +351,10 @@ const FLOWS = {
     nodes: ["flutter_app","api_gateway","auth_svc","mariadb_phase1"],
     steps: [
       "Người dùng gửi request đăng nhập/đăng ký từ Flutter App.",
-      "API Gateway xác thực và điều hướng tới Auth Service (:5000).",
+      "Client hoặc web same-origin proxy gọi Auth Service (:5000).",
       "Auth Service xử lý đăng ký/đăng nhập, tạo JWT token.",
-      "Thông tin user lưu vào MariaDB <code>lucy_phase1</code>.",
-      "JWT token trả về client qua Gateway."
+      "Thông tin user lưu vào MariaDB <code>lucy_phase5</code>.",
+      "JWT token trả về client."
     ]
   },
   wallet: {
@@ -363,9 +363,9 @@ const FLOWS = {
     nodes: ["flutter_app","api_gateway","wallet_svc","mariadb_wallet"],
     steps: [
       "Người dùng thao tác ví (xem số dư, nạp tiền, tặng quà).",
-      "API Gateway điều hướng tới Wallet Service (:5040) kèm X-User-Id.",
+      "Client hoặc web proxy gọi Wallet Service (:5041); Bearer token được forward khi cần.",
       "Wallet Service xử lý giao dịch: kiểm tra số dư, tạo giao dịch nguyên tử.",
-      "Dữ liệu ví lưu vào MariaDB <code>lucy_wallet</code>.",
+      "Dữ liệu ví lưu vào MariaDB <code>lucy_phase5</code>.",
       "Kết quả trả về client."
     ]
   },
@@ -374,10 +374,10 @@ const FLOWS = {
     edges: ["e-flutter-realtime","e-gateway-realtime","e-realtime-db"],
     nodes: ["web_client","api_gateway","realtime_svc","mariadb_realtime"],
     steps: [
-      "Người dùng kết nối WebSocket tới Realtime Server qua Gateway.",
-      "Socket.IO thiết lập kết nối, xác thực token.",
+      "Người dùng kết nối Socket.IO trực tiếp tới Realtime Server.",
+      "Room join hiện nhận identity payload; recording/tài liệu xác thực Bearer token qua Auth.",
       "User tham gia phòng, gửi/nhận sự kiện (giơ tay, mic, ping).",
-      "Sự kiện được ghi vào MariaDB <code>lucy_realtime</code>.",
+      "Sự kiện được ghi vào MariaDB <code>lucy_phase5</code>.",
       "Các user khác trong phòng nhận được cập nhật realtime."
     ]
   },
@@ -389,7 +389,7 @@ const FLOWS = {
       "Mentor chạy LMS Console để xem dashboard.",
       "LMS Service khởi tạo state engine với 4 giai đoạn học tập.",
       "Học viên tiến qua các giai đoạn: WarmUp → GuidedPractice → PeerExchange → Reflection.",
-      "Mỗi bước chuyển được ghi vào MariaDB <code>lucy_lms</code>.",
+      "Mỗi bước chuyển được ghi vào MariaDB <code>lucy_phase5</code>.",
       "Mentor theo dõi tiến độ qua MentorDashboard."
     ]
   }

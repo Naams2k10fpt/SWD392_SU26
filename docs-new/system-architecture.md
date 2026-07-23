@@ -2,10 +2,10 @@
 
 | **Tên dự án** | LUCY (Language Unity & Collaborative Youth) |
 |---|---|
-| **Phiên bản** | 1.1.0 |
+| **Phiên bản** | 1.2.0 |
 | **Ngày cập nhật** | 2026-07-23 |
 | **Loại tài liệu** | Architecture |
-| **Công nghệ** | .NET 10, Node.js 22, Java 26, MariaDB 12, Flutter 3.27+ |
+| **Công nghệ** | .NET 10, Node.js 22, Java 17, MariaDB 12, Flutter 3.10+ |
 
 ---
 
@@ -52,8 +52,8 @@ LUCY áp dụng **Microservices Architecture** với các đặc điểm sau:
        ▼              ▼              ▼          ▼
 ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐
 │ Auth       │ │ Wallet     │ │ Realtime   │ │ LMS        │
-│ .NET 10    │ │ .NET 10    │ │ Node.js 22 │ │ Java 26    │
-│ :5000      │ │ :5040      │ │ :3020      │ │ Console    │
+│ .NET 10    │ │ .NET 10    │ │ Node.js 22 │ │ Java 17    │
+│ :5000      │ │ :5041      │ │ :3020      │ │ Console    │
 │            │ │            │ │            │ │            │
 │ JWT Issue  │ │ Swagger UI │ │ Socket.IO  │ │ State      │
 │ Register/  │ │ Top-up     │ │ Room Mgmt  │ │ Pattern    │
@@ -76,7 +76,7 @@ LUCY áp dụng **Microservices Architecture** với các đặc điểm sau:
 | Service | Internal Port | External Port | Protocol | Ghi chú |
 |---|---|---|---|---|
 | Auth Service | 5000 | 5000 | HTTP | Minimal API, không Swagger |
-| Wallet Service | 5040 | 5040 | HTTP | Có Swagger UI |
+| Wallet Service | 5041 | 5041 | HTTP | Có Swagger UI |
 | Realtime Service | 3020 | 3020 | HTTP + WebSocket | Express + Socket.IO |
 | MariaDB | 3306 | 3306 | MySQL protocol | Cổng mặc định |
 | LMS | Console | — | — | Chạy theo lệnh |
@@ -189,7 +189,7 @@ modal sau reload.
 | **Auth API** | ASP.NET Core Minimal API | .NET 10 | Identity framework, JWT support |
 | **Wallet API** | ASP.NET Core Minimal API + Swagger | .NET 10 | Swagger cho API documentation |
 | **Realtime** | Express + Socket.IO | Node.js 22 | WebSocket performance, event-driven |
-| **LMS** | Java Console + State Pattern | Java 26 | State Pattern implementation, OOP |
+| **LMS** | Java Console + State Pattern | Java 17 | State Pattern implementation, OOP |
 | **Database** | MariaDB | 12.2 | Ổn định, utf8mb4 support |
 | **ORM** | ADO.NET (MySqlConnector) | — | Lightweight, direct SQL control |
 | **ORM (Node)** | mysql2 | — | Promise-based, connection pool |

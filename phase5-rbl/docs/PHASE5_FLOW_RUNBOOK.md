@@ -181,6 +181,16 @@ Module/tài liệu mới:
 - `phase5-rbl/final-evaluation/cross-testing-checklist.md`
 - `phase5-rbl/final-evaluation/final-defense-guide.md`
 - `phase5-rbl/docs/FULL_RBL_FUNCTIONAL_FLOW.md`
+- `phase5-rbl/docs/room-chat-recording-feature.md`
+- `web_app/`
+
+Phần tích hợp hiện hành của Phase 5 bổ sung:
+
+1. Phòng công khai/có password, xác nhận khi rời phòng và retry join sau F5.
+2. Chat giới hạn 500 ký tự; tài liệu ở panel riêng cho PRO/SUPER.
+3. Ghi âm có timer, speaking indicator và CRUD podcast cho PRO/SUPER.
+4. Super Chat trong phòng; lịch sử quà yêu cầu JWT và chỉ trả giao dịch của user
+   hiện tại.
 
 Flow stress test:
 
@@ -203,7 +213,7 @@ k6 run stress-tests/realtime-auth-wallet-stress.js
 Nếu service chạy port khác:
 
 ```bash
-AUTH_BASE_URL=http://localhost:5000 REALTIME_BASE_URL=http://localhost:3020 WALLET_BASE_URL=http://localhost:5040 k6 run stress-tests/realtime-auth-wallet-stress.js
+AUTH_BASE_URL=http://localhost:5000 REALTIME_BASE_URL=http://localhost:3020 WALLET_BASE_URL=http://localhost:5041 k6 run stress-tests/realtime-auth-wallet-stress.js
 ```
 
 Nếu chưa cài k6:
@@ -247,4 +257,7 @@ node --check stress-tests/realtime-auth-wallet-stress.js
 
 ## Ghi chú production readiness
 
-Các module hiện là MVP/scaffold để đáp ứng RBL và defense kiến trúc. Trước khi production cần bổ sung Agora token thật, payment gateway thật, persistent database, JWT middleware, authorization theo role, logging/monitoring, CI/CD, object storage cho podcast và kiểm chứng thủ công/nâng cấp parser cho file PDF English Stage 3.
+Các module hiện là MVP/scaffold để đáp ứng RBL và defense kiến trúc. Trước khi
+production cần bổ sung Agora token thật, payment gateway thật, idempotency/outbox,
+xác thực server-side cho room join và mọi Socket event, logging/monitoring, CI/CD,
+object storage cho podcast/tài liệu và kiểm chứng parser cho file PDF English Stage 3.

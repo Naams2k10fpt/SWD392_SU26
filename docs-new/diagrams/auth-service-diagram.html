@@ -194,7 +194,7 @@
   <g class="zone" id="z-auth">
     <rect x="290" y="100" width="240" height="620"/>
     <text class="ztitle" x="310" y="130">Auth API (.NET :5000)</text>
-    <text class="zsub" x="310" y="148">AuthController · JWT</text>
+    <text class="zsub" x="310" y="148">Minimal API endpoints · JWT</text>
   </g>
   <g class="zone" id="z-middleware">
     <rect x="560" y="100" width="320" height="620"/>
@@ -248,7 +248,7 @@
   <!-- ── nodes: auth api ───────────────────── -->
   <g class="node gate" data-k="auth_ctrl">
     <rect x="310" y="200" width="200" height="80"/>
-    <text class="t" x="330" y="228">AuthController</text>
+    <text class="t" x="330" y="228">Minimal API endpoints</text>
     <text class="m" x="330" y="248">POST /auth/register</text>
     <text class="m" x="330" y="262">POST /auth/login</text>
     <text class="m" x="330" y="274">GET /auth/me</text>
@@ -256,7 +256,7 @@
   <g class="node do" data-k="password_hasher">
     <rect x="310" y="320" width="200" height="60"/>
     <text class="t" x="330" y="348">PasswordHasher</text>
-    <text class="m" x="330" y="366">HMAC-SHA256</text>
+    <text class="m" x="330" y="366">PBKDF2 (Identity)</text>
   </g>
   <g class="node do" data-k="jwt_handler">
     <rect x="310" y="440" width="200" height="60"/>
@@ -272,19 +272,19 @@
   </g>
   <g class="node do" data-k="role_checker">
     <rect x="580" y="320" width="280" height="60"/>
-    <text class="t" x="600" y="348">Role Checker</text>
-    <text class="m" x="600" y="366">Role-based authorization</text>
+    <text class="t" x="600" y="348">Authorization Gate</text>
+    <text class="m" x="600" y="366">Require authenticated user</text>
   </g>
   <g class="node do" data-k="error_handler">
     <rect x="580" y="440" width="280" height="60"/>
-    <text class="t" x="600" y="468">Error Handler</text>
-    <text class="m" x="600" y="486">Global exception handler</text>
+    <text class="t" x="600" y="468">HTTP Error Response</text>
+    <text class="m" x="600" y="486">400 · 401 · 409</text>
   </g>
 
   <!-- ── nodes: data stores ────────────────── -->
   <g class="node store" data-k="mariadb">
     <rect x="930" y="200" width="180" height="90"/>
-    <text class="t" x="950" y="230">MariaDB (lucy_phase1)</text>
+    <text class="t" x="950" y="230">MariaDB (lucy_phase5)</text>
     <text class="m" x="950" y="252">users · user_roles · roles</text>
     <text class="m" x="950" y="270">Port 3306 · UTF8MB4</text>
   </g>
@@ -315,13 +315,13 @@
 const DETAIL = {
   flutter_app: { t: "Flutter App", m: "Mobile App", b: "Ứng dụng di động Flutter. Gửi yêu cầu xác thực tới Auth Service (cổng 5000) để đăng ký, đăng nhập, và lấy hồ sơ người dùng." },
   web_client: { t: "curl / Postman", m: "REST Consumer", b: "Trình duyệt web, cURL, Postman — dùng để test API trong quá trình phát triển." },
-  auth_ctrl: { t: "AuthController", m: "REST Controller (.NET 10)", b: "Xử lý các route xác thực: <code>POST /auth/register</code> (đăng ký), <code>POST /auth/login</code> (cấp JWT), <code>GET /auth/me</code> (hồ sơ)." },
-  password_hasher: { t: "PasswordHasher", m: "Security Component", b: "Băm mật khẩu người dùng bằng HMAC-SHA256 trước khi lưu vào MariaDB. Không bao giờ lưu plaintext." },
+  auth_ctrl: { t: "Minimal API endpoints", m: "REST Controller (.NET 10)", b: "Xử lý các route xác thực: <code>POST /auth/register</code> (đăng ký), <code>POST /auth/login</code> (cấp JWT), <code>GET /auth/me</code> (hồ sơ)." },
+  password_hasher: { t: "PasswordHasher", m: "ASP.NET Core Identity", b: "Băm mật khẩu bằng PasswordHasher của ASP.NET Core Identity (PBKDF2-based) trước khi lưu vào MariaDB. Không lưu plaintext." },
   jwt_handler: { t: "JwtHandler", m: "JWT Token Manager", b: "Tạo và xác thực JWT ký bằng HMAC-SHA256. Token có thời hạn 2 giờ, chứa user ID và vai trò." },
-  jwt_middleware: { t: "JWT Middleware", m: "ASP.NET Middleware", b: "Xác thực Bearer token trên mọi request. Parse JWT, kiểm tra chữ ký, gắn thông tin user vào HTTP context." },
-  role_checker: { t: "Role Checker", m: "Authorization Middleware", b: "Kiểm tra vai trò (Anonymous, Pro, Super) theo yêu cầu endpoint. Trả về 403 Forbidden nếu không đủ quyền." },
-  error_handler: { t: "Error Handler", m: "Global Exception Middleware", b: "Bắt tất cả ngoại lệ chưa xử lý và trả về JSON lỗi đồng nhất. Ghi log ra console." },
-  mariadb: { t: "MariaDB (lucy_phase1)", m: "Relational Database (Port 3306)", b: "MariaDB 12.2 lưu <code>users</code>, <code>user_roles</code>, <code>roles</code>. Được Auth Service truy cập để xác thực thông tin đăng nhập." }
+  jwt_middleware: { t: "JWT Middleware", m: "ASP.NET Middleware", b: "Xác thực Bearer token cho endpoint được bảo vệ như <code>GET /auth/me</code>, kiểm tra issuer, audience, chữ ký và thời hạn." },
+  role_checker: { t: "Authorization Gate", m: "RequireAuthorization", b: "<code>/auth/me</code> yêu cầu user đã xác thực; endpoint Auth hiện không áp role-specific policy." },
+  error_handler: { t: "HTTP Error Response", m: "Minimal API", b: "Validation và authentication trả các trạng thái 400, 401 hoặc 409 tùy lỗi." },
+  mariadb: { t: "MariaDB (lucy_phase5)", m: "Relational Database (Port 3306)", b: "MariaDB 12.2 lưu <code>users</code>, <code>user_roles</code>, <code>roles</code>. Được Auth Service truy cập để xác thực thông tin đăng nhập." }
 };
 
 const FLOWS = {
@@ -331,9 +331,9 @@ const FLOWS = {
     nodes: ["flutter_app","auth_ctrl","password_hasher","mariadb"],
     steps: [
       "Người dùng gửi form đăng ký từ Flutter App với email, tên hiển thị, và mật khẩu.",
-      "<code>AuthController</code> nhận <code>POST /auth/register</code>, gọi <code>PasswordHasher</code> để băm mật khẩu.",
-      "<code>PasswordHasher</code> băm mật khẩu dùng HMAC-SHA256 với salt an toàn.",
-      "<code>AuthController</code> chèn bản ghi user mới vào MariaDB bảng <code>users</code>.",
+      "<code>Minimal API endpoints</code> nhận <code>POST /auth/register</code>, gọi <code>PasswordHasher</code> để băm mật khẩu.",
+      "<code>PasswordHasher</code> băm mật khẩu bằng PBKDF2-based ASP.NET Core Identity với salt.",
+      "<code>Minimal API endpoints</code> chèn bản ghi user mới vào MariaDB bảng <code>users</code>.",
       "JWT token được tạo cho user mới và trả về Flutter App."
     ]
   },
@@ -343,8 +343,8 @@ const FLOWS = {
     nodes: ["web_client","auth_ctrl","jwt_handler","mariadb"],
     steps: [
       "Người dùng gửi thông tin đăng nhập qua <code>POST /auth/login</code> từ web/cURL.",
-      "<code>AuthController</code> kiểm tra email/mật khẩu với hash trong MariaDB.",
-      "Thành công, <code>AuthController</code> gọi <code>JwtHandler</code> tạo JWT đã ký.",
+      "<code>Minimal API endpoints</code> kiểm tra email/mật khẩu với hash trong MariaDB.",
+      "Thành công, <code>Minimal API endpoints</code> gọi <code>JwtHandler</code> tạo JWT đã ký.",
       "<code>JwtHandler</code> đọc vai trò user từ MariaDB bảng <code>user_roles</code>.",
       "JWT token (HMAC-SHA256, 2h) được trả về client."
     ]
@@ -356,8 +356,8 @@ const FLOWS = {
     steps: [
       "User đã xác thực yêu cầu <code>GET /auth/me</code> kèm Bearer JWT token.",
       "<code>JWT Middleware</code> xác thực chữ ký và thời hạn token.",
-      "<code>Role Checker</code> kiểm tra quyền truy cập của user.",
-      "<code>AuthController</code> trả về thông tin hồ sơ từ token claims."
+      "<code>RequireAuthorization</code> yêu cầu user đã xác thực.",
+      "<code>Minimal API endpoints</code> trả về thông tin hồ sơ từ token claims."
     ]
   }
 };

@@ -14,7 +14,7 @@
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
 │  │  Auth    │ │  Wallet  │ │ Realtime │ │   LMS    │  │
 │  │  .NET    │ │  .NET    │ │  Node.js │ │   Java   │  │
-│  │  :5000   │ │  :5040   │ │  :3020   │ │  Console │  │
+│  │  :5000   │ │  :5041   │ │  :3020   │ │  Console │  │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
 │                       MariaDB                           │
 └─────────────────────────────────────────────────────────┘
@@ -65,13 +65,15 @@
 |---|---|---|
 | **State** | Stateless — không cần lưu server | Stateful — cần lưu session DB/memory |
 | **Scale ngang** | Dễ — bất kỳ server nào verify được token | Khó — cần shared session store (Redis) |
-| **Cross-service** | Dễ — các service chỉ cần shared secret | Phức tạp — phải gọi Auth service mỗi lần |
-| **Real-time (Socket.IO)** | Có JWT middleware, verify token trước join room | Khó tích hợp với WebSocket |
+| **Cross-service** | JWT truyền identity giữa các service | Phức tạp — cần shared session store |
+| **Real-time (Socket.IO)** | Dùng được trong handshake/event auth | Khó tích hợp với WebSocket |
 
 **Lý do chọn JWT:**
-1. SOA cần cross-service authentication. JWT cho phép Auth, Wallet, Realtime tự verify.
+1. SOA cần cross-service authentication. Bản hiện tại để Wallet/Realtime gọi
+   `/auth/me` khi xử lý gift, podcast, recording và tài liệu.
 2. Role (Anonymous, Pro, Super) embedded trong token claims.
-3. Socket.IO có JWT middleware sẵn.
+3. Room join hiện vẫn tin identity trong payload; production phải xác thực JWT ở
+   Socket.IO middleware trước khi join.
 
 ---
 
@@ -135,7 +137,7 @@
 |---|---|---|
 | **Triển khai** | 1 database duy nhất, dễ setup | 4 database riêng, phức tạp |
 | **Query xuyên service** | JOIN trực tiếp | Phải gọi API inter-service |
-| **Phù hợp quy mô** | Đồ án sinh viên, <10 bảng | Hệ thống lớn, trăm service |
+| **Phù hợp quy mô** | Đồ án sinh viên, 24 bảng | Hệ thống lớn, trăm service |
 
 **Lý do chọn Shared Database:**
 1. Quy mô đồ án nhỏ — database-per-service là over-engineering.
