@@ -96,11 +96,13 @@ app.MapPost("/gifts", async (GiftRequest request, HttpRequest httpRequest) =>
     }
 });
 
-app.MapGet("/gifts", async () =>
+app.MapGet("/gifts", async (HttpRequest httpRequest) =>
 {
+    AuthenticatedUser? authenticatedUser = await Authenticate(authClient, httpRequest.Headers.Authorization.ToString());
+    if (authenticatedUser is null) return Results.Unauthorized();
     await using var connection = new MySqlConnection(connectionString);
     await connection.OpenAsync();
-    return Results.Ok(await ListGifts(connection));
+    return Results.Ok(await ListGifts(connection, authenticatedUser.Id));
 });
 
 app.MapPost("/podcasts/recordings", async (PodcastRecordingRequest request, HttpRequest httpRequest) =>
@@ -297,7 +299,7 @@ static async Task<GiftTransaction> InsertGift(MySqlConnection connection, MySqlT
     return new GiftTransaction(id, request.FromUserId, request.ToCreatorId, request.FromUserId, request.ToCreatorId, request.RoomId ?? "", request.Amount, request.Message ?? "", DateTimeOffset.UtcNow);
 }
 
-static async Task<List<GiftTransaction>> ListGifts(MySqlConnection connection)
+static async Task<List<GiftTransaction>> ListGifts(MySqlConnection connection, string userId)
 {
     var gifts = new List<GiftTransaction>();
     await using var command = connection.CreateCommand();
@@ -311,8 +313,10 @@ static async Task<List<GiftTransaction>> ListGifts(MySqlConnection connection)
         JOIN wallet_accounts receiver ON receiver.id = g.to_wallet_id
         LEFT JOIN users sender_user ON sender_user.id = sender.external_owner_id
         LEFT JOIN users receiver_user ON receiver_user.id = receiver.external_owner_id
+        WHERE sender.external_owner_id = @userId OR receiver.external_owner_id = @userId
         ORDER BY g.created_at DESC
         """;
+    command.Parameters.AddWithValue("@userId", userId);
     await using var reader = await command.ExecuteReaderAsync();
     while (await reader.ReadAsync())
     {

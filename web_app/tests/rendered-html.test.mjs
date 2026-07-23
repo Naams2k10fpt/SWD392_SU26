@@ -111,6 +111,8 @@ test("keeps web contracts and proxy boundaries explicit", async () => {
   assert.match(realtimeServer, /realtime_event = 'gift:announced'/);
   assert.match(walletServer, /recipient must be a PRO or SUPER user in the same room/i);
   assert.match(walletServer, /COALESCE\(sender_user\.display_name/);
+  assert.match(walletServer, /ListGifts\(connection, authenticatedUser\.Id\)/);
+  assert.match(walletServer, /WHERE sender\.external_owner_id = @userId OR receiver\.external_owner_id = @userId/);
   assert.match(walletServer, /COALESCE\(u\.display_name, p\.creator_external_id\)/);
   assert.match(walletServer, /MapPut\("\/podcasts\/recordings\/\{id\}"/);
   assert.match(walletServer, /MapDelete\("\/podcasts\/recordings\/\{id\}"/);
