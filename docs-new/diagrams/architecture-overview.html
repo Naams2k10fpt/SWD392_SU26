@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LUCY — Kiến trúc hệ thống | SWD392</title>
+<script>
+  (() => {
+    const s = localStorage.getItem('lucyscheme');
+    const d = s ? s === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', d);
+  })();
+</script>
+<style>
+  :root {
+    --bg: #F7F5F0; --surface: #FFFFFF; --surface2: #EFECE4;
+    --ink: #1A1A18; --body: #3D3D3A; --muted: #87867F;
+    --line: #D1CFC5; --line-soft: #E6E3DA;
+    --coral: #D9644A; --coral-soft: rgba(217,100,74,0.10); --coral-glow: rgba(217,100,74,0.20);
+    --teal: #3D8B7E; --teal-soft: rgba(61,139,126,0.10);
+    --gold: #C9A45C; --gold-soft: rgba(201,164,92,0.12);
+    --violet: #7B6B9E; --violet-soft: rgba(123,107,158,0.10);
+    --blue: #5B7E96; --blue-soft: rgba(91,126,150,0.10);
+    --zone: rgba(26,26,24,0.025); --zone-line: #D1CFC5;
+    --serif: "Source Serif 4", ui-serif, Georgia, "Times New Roman", serif;
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --shadow: 0 6px 24px rgba(0,0,0,0.07);
+    --shadow-lg: 0 12px 40px rgba(0,0,0,0.10);
+  }
+  html.dark {
+    --bg: #161614; --surface: #1F1F1D; --surface2: #2A2A28;
+    --ink: #F7F5F0; --body: #D1CFC5; --muted: #87867F;
+    --line: #3D3D3A; --line-soft: #2A2A28;
+    --coral: #E87A60; --coral-soft: rgba(232,122,96,0.14); --coral-glow: rgba(232,122,96,0.25);
+    --teal: #5BA99B; --teal-soft: rgba(91,169,155,0.14);
+    --gold: #D4B36F; --gold-soft: rgba(212,179,111,0.16);
+    --violet: #9B8BC0; --violet-soft: rgba(155,139,192,0.14);
+    --blue: #7FA3BC; --blue-soft: rgba(127,163,188,0.14);
+    --zone: rgba(247,245,240,0.03); --zone-line: #3D3D3A;
+    --shadow: 0 6px 24px rgba(0,0,0,0.30);
+    --shadow-lg: 0 12px 40px rgba(0,0,0,0.45);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--body); font-family: var(--sans);
+    -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* ── top bar ─────────────────────────────── */
+  .bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 18px; border-bottom: 1px solid var(--line-soft); flex: none; z-index: 10;
+  }
+  .bar .logo { display: flex; align-items: center; gap: 8px; }
+  .bar .logo mark {
+    font-family: var(--serif); font-weight: 600; font-size: 20px; color: var(--coral);
+    background: none; letter-spacing: -0.02em;
+  }
+  .bar h1 { font-family: var(--serif); font-weight: 500; font-size: 17px; color: var(--ink); letter-spacing: -0.01em; }
+  .bar .sub { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+  .spacer { flex: 1; min-width: 8px; }
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; }
+  .chip {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.03em;
+    padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px;
+    background: transparent; color: var(--muted); cursor: pointer; transition: all .15s ease;
+    white-space: nowrap;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--muted); }
+  .chip.on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+  #themeToggle {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em;
+    padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px;
+    background: transparent; color: var(--muted); cursor: pointer; transition: all .15s ease;
+  }
+  #themeToggle:hover { color: var(--ink); border-color: var(--muted); }
+  #zoomLbl {
+    font-family: var(--mono); font-size: 10px; color: var(--muted);
+    padding: 4px 6px; min-width: 44px; text-align: center;
+  }
+  #resetBtn {
+    font-family: var(--mono); font-size: 10px;
+    padding: 4px 8px; border: 1px solid var(--line); border-radius: 5px;
+    background: transparent; color: var(--muted); cursor: pointer; transition: all .15s ease;
+  }
+  #resetBtn:hover { color: var(--ink); border-color: var(--muted); }
+
+  /* ── stage ──────────────────────────────── */
+  .stage-wrap {
+    flex: 1; position: relative; overflow: hidden;
+    cursor: grab; background: var(--bg);
+  }
+  .stage-wrap.grabbing { cursor: grabbing; }
+  .stage-wrap svg {
+    display: block; width: 100%; height: 100%;
+  }
+  .stage-wrap .svg-out { transform-origin: 0 0; }
+
+  /* ── zones ──────────────────────────────── */
+  .zone rect { fill: var(--zone); stroke: var(--zone-line); stroke-width: 1.5; rx: 12; }
+  .zone .ztitle { font-family: var(--mono); font-size: 11px; font-weight: 600; fill: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; }
+  .zone .zsub { font-family: var(--mono); font-size: 9.5px; fill: var(--muted); }
+
+  /* ── nodes ──────────────────────────────── */
+  .node { cursor: pointer; transition: opacity .25s ease; }
+  .node rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; rx: 10; transition: stroke .25s ease, fill .25s ease; }
+  .node:hover rect { stroke: var(--muted); }
+  .node .t { font-family: var(--sans); font-size: 15px; font-weight: 600; fill: var(--ink); }
+  .node .m { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+  .node .tag {
+    font-family: var(--mono); font-size: 9px; font-weight: 700;
+    fill: var(--bg); text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .node .tag-bg { rx: 4; }
+  .node.sel rect { stroke: var(--coral); stroke-width: 2; }
+  .node.sel .t { fill: var(--coral); }
+  .stage.flowing .node.lit { opacity: 1; }
+  .stage.flowing .node.lit rect { stroke: var(--coral); }
+
+  /* ── node colors ────────────────────────── */
+  .node.client rect         { border-color: var(--blue); }
+  .node.client .tag-bg      { fill: var(--blue); }
+  .node.service rect        { border-color: var(--teal); }
+  .node.service .tag-bg     { fill: var(--teal); }
+  .node.db rect             { border-color: var(--violet); }
+  .node.db .tag-bg          { fill: var(--violet); }
+  .node.external rect       { border-color: var(--gold); }
+  .node.external .tag-bg    { fill: var(--gold); }
+
+  .stage.flowing .node.lit.client rect { stroke: var(--blue); }
+  .stage.flowing .node.lit.service rect { stroke: var(--teal); }
+  .stage.flowing .node.lit.db rect { stroke: var(--violet); }
+  .stage.flowing .node.lit.external rect { stroke: var(--gold); }
+
+  /* ── edges ──────────────────────────────── */
+  .edge {
+    fill: none; stroke: var(--line); stroke-width: 1.8;
+    marker-end: url(#a-mut); transition: opacity .3s ease, stroke .3s ease;
+  }
+  .edge.thick { stroke-width: 2.5; }
+  .edge.ws { stroke-dasharray: 6 4; }
+  .edge.db-line { stroke: var(--violet); stroke-width: 1.2; stroke-dasharray: 4 4; }
+  .edge.webrtc { stroke: var(--gold); stroke-width: 1.5; stroke-dasharray: 8 6; }
+  .edge.upload { stroke: var(--coral); stroke-width: 2; }
+  .stage.flowing .edge.lit { opacity: 1; stroke: var(--coral); marker-end: url(#a-coral); }
+  .stage.flowing .edge.lit.thick { stroke: var(--coral); }
+  .stage.flowing .edge.lit.ws { stroke: var(--coral); }
+  .stage.flowing .edge.lit.db-line { stroke: var(--violet); marker-end: url(#a-violet); }
+  .stage.flowing .edge.lit.upload { stroke: var(--coral); }
+  .stage.flowing .edge.lit.webrtc { stroke: var(--gold); marker-end: url(#a-gold); }
+  @keyframes march { to { stroke-dashoffset: -12; } }
+
+  /* ── edge labels ─────────────────────────── */
+  .elbl { font-family: var(--mono); font-size: 9.5px; fill: var(--muted); transition: fill .3s ease, opacity .3s ease; }
+  .elbl .emoji { font-family: var(--sans); }
+  .stage.flowing .elbl.lit { fill: var(--coral); }
+  .stage.flowing .elbl.lit.violet { fill: var(--violet); }
+  .stage.flowing .elbl.lit.gold { fill: var(--gold); }
+  .stage.flowing .elbl.lit.teal { fill: var(--teal); }
+
+  /* ── floating cards ──────────────────────── */
+  .card {
+    position: absolute; max-width: 380px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; box-shadow: var(--shadow);
+    z-index: 20; transition: opacity .2s ease, transform .2s ease;
+  }
+  .card.hide { opacity: 0; pointer-events: none; transform: translateY(6px); }
+  .close-btn {
+    position: absolute; top: 8px; right: 10px;
+    font-family: var(--mono); font-size: 14px; line-height: 1;
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    padding: 2px 5px; border-radius: 4px; transition: all .12s ease;
+  }
+  .close-btn:hover { background: var(--surface2); color: var(--ink); }
+
+  #detail { right: 16px; bottom: 16px; width: 340px; }
+  #detail.hide { display: none; }
+  #detail h3 { font-family: var(--serif); font-weight: 500; font-size: 17px; color: var(--ink); margin-bottom: 2px; letter-spacing: -0.01em; }
+  #detail .meta { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 8px; }
+  #detail p { font-size: 12.5px; line-height: 1.6; color: var(--body); }
+  #detail p code, #flowcap code { font-family: var(--mono); font-size: 11px; color: var(--coral); }
+
+  #flowcap { left: 16px; bottom: 16px; max-width: 480px; }
+  #flowcap .fname { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--coral); margin-bottom: 6px; font-weight: 600; }
+  #flowcap ol { margin-left: 18px; }
+  #flowcap li { font-size: 12px; line-height: 1.65; margin-bottom: 2px; }
+  #flowcap .badge-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 17px; height: 17px; border-radius: 50%;
+    background: var(--coral-soft); color: var(--coral);
+    font-family: var(--mono); font-size: 9px; font-weight: 700;
+    margin-right: 4px;
+  }
+
+  /* ── webrtc annotation ──────────────────── */
+  .webrtc-anno text {
+    font-family: var(--mono); font-size: 10px; fill: var(--gold);
+    text-anchor: middle; font-weight: 600;
+  }
+  .webrtc-anno .sub { font-size: 9px; fill: var(--muted); font-weight: 400; }
+
+  @media (max-width: 820px) {
+    body { overflow: auto; }
+    .stage-wrap { min-height: 75vh; }
+    #detail { right: 8px; bottom: 8px; left: 8px; width: auto; }
+    #flowcap { left: 8px; right: 8px; bottom: 8px; max-width: none; }
+    .bar .sub { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="logo">
+    <mark>LUCY</mark>
+    <h1>Kiến trúc hệ thống</h1>
+    <span class="sub">SWD392 · Language Learning Platform</span>
+  </div>
+  <div class="spacer"></div>
+  <div class="chips" id="chips">
+    <button class="chip on" data-flow="all">Tổng quan</button>
+    <button class="chip" data-flow="login">Đăng nhập</button>
+    <button class="chip" data-flow="topup">Nạp tiền</button>
+    <button class="chip" data-flow="audio">Gọi âm thanh</button>
+    <button class="chip" data-flow="upload">Tải ghi âm</button>
+    <button class="chip" data-flow="gift">Quà tặng</button>
+  </div>
+  <button id="resetBtn" title="Đặt lại thu phóng">⟲</button>
+  <span id="zoomLbl">100%</span>
+  <button id="themeToggle">☀/☾</button>
+</div>
+
+<div class="stage-wrap" id="stageWrap">
+<div class="svg-out" id="svgOut">
+<svg viewBox="0 0 1500 840" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Kiến trúc hệ thống nền tảng học ngôn ngữ LUCY">
+  <defs>
+    <marker id="a-mut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"/>
+    </marker>
+    <marker id="a-coral" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--coral)"/>
+    </marker>
+    <marker id="a-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--violet)"/>
+    </marker>
+    <marker id="a-gold" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--gold)"/>
+    </marker>
+    <marker id="a-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--teal)"/>
+    </marker>
+  </defs>
+
+  <g class="zone" id="z-clients">
+    <rect x="35" y="80" width="360" height="320"/>
+    <text class="ztitle" x="55" y="108">Ứng dụng khách</text>
+    <text class="zsub" x="55" y="123">Clients</text>
+  </g>
+  <g class="zone" id="z-services">
+    <rect x="435" y="80" width="620" height="360"/>
+    <text class="ztitle" x="455" y="108">Dịch vụ backend</text>
+    <text class="zsub" x="455" y="123">Services</text>
+  </g>
+  <g class="zone" id="z-db">
+    <rect x="435" y="480" width="620" height="110"/>
+    <text class="ztitle" x="455" y="506">Tầng dữ liệu</text>
+    <text class="zsub" x="455" y="521">Data Layer</text>
+  </g>
+  <g class="zone" id="z-lms">
+    <rect x="1095" y="80" width="360" height="130"/>
+    <text class="ztitle" x="1115" y="108">Hệ thống phụ trợ</text>
+    <text class="zsub" x="1115" y="123">Supporting</text>
+  </g>
+
+  <!-- ═══════════════ EDGES ═══════════════ -->
+
+  <path class="edge thick" id="e-web-auth" d="M395,180 C425,180 450,180 480,180"/>
+  <path class="edge thick" id="e-auth-web" d="M480,190 C450,190 425,190 395,190"/>
+  <path class="edge thick" id="e-web-wallet" d="M395,165 C560,140 730,140 820,165"/>
+  <path class="edge ws" id="e-web-rt-ws" d="M395,218 C430,285 450,315 480,315"/>
+  <path class="edge upload" id="e-web-rt-up" d="M395,232 C430,305 450,335 480,333"/>
+  <path class="edge" id="e-rt-auth" d="M610,280 L610,240"/>
+  <path class="edge webrtc" id="e-webrtc" d="M100,130 C60,30 280,30 280,130"/>
+  <path class="edge db-line" id="e-auth-db" d="M610,240 L610,520"/>
+  <path class="edge db-line" id="e-wallet-db" d="M980,240 L980,520"/>
+  <path class="edge db-line" id="e-rt-db" d="M780,420 L780,520"/>
+  <path class="edge db-line" id="e-lms-db" d="M1275,210 L1275,520 C1275,535 1270,545 1240,545"/>
+
+  <!-- ═══════════════ EDGE LABELS ═══════════════ -->
+
+  <text class="elbl" data-e="e-web-auth" x="425" y="172" text-anchor="middle">
+    <tspan class="emoji" dy="0">⚡</tspan>
+    <tspan dy="-3"> REST/JSON</tspan>
+  </text>
+  <text class="elbl" data-e="e-web-auth" x="425" y="208" text-anchor="middle">
+    <tspan font-size="8.5" fill="var(--muted)">JWT · Đăng ký / Nhập</tspan>
+  </text>
+
+  <text class="elbl" data-e="e-web-wallet" x="680" y="134" text-anchor="middle">
+    <tspan class="emoji" dy="0">⚡</tspan>
+    <tspan dy="-3"> REST/JSON</tspan>
+  </text>
+  <text class="elbl" data-e="e-web-wallet" x="680" y="148" text-anchor="middle" font-size="8.5" fill="var(--muted)">
+    Ví · Nạp tiền · Quà tặng
+  </text>
+
+  <text class="elbl" data-e="e-web-rt-ws" x="420" y="278" text-anchor="middle">
+    <tspan class="emoji" dy="0">🔌</tspan>
+    <tspan dy="-3"> Socket.IO</tspan>
+  </text>
+  <text class="elbl" data-e="e-web-rt-ws" x="420" y="292" text-anchor="middle" font-size="8.5" fill="var(--muted)">
+    room:join · chat · ghi âm
+  </text>
+
+  <text class="elbl" data-e="e-web-rt-up" x="420" y="320" text-anchor="middle">
+    <tspan class="emoji" dy="0">📤</tspan>
+    <tspan dy="-3"> HTTP Upload</tspan>
+  </text>
+  <text class="elbl" data-e="e-web-rt-up" x="420" y="348" text-anchor="middle" font-size="8.5" fill="var(--muted)">
+    Ghi âm · Tài liệu
+  </text>
+
+  <text class="elbl" data-e="e-rt-auth" x="598" y="275" text-anchor="end" font-size="8.5">
+    <tspan class="emoji" dy="0">🔐</tspan>
+    <tspan dy="-3"> :5000/me</tspan>
+  </text>
+
+  <text class="elbl" data-e="e-webrtc" x="190" y="46" text-anchor="middle">
+    <tspan class="emoji" dy="0">🌐</tspan>
+    <tspan dy="-3"> WebRTC P2P</tspan>
+  </text>
+  <text class="elbl" data-e="e-webrtc" x="190" y="60" text-anchor="middle" font-size="8.5" fill="var(--muted)">
+    Âm thanh thời gian thực
+  </text>
+
+  <!-- DB edge labels -->
+  <text class="elbl violet" data-e="e-auth-db" x="600" y="400" text-anchor="end" font-size="8.5">
+    Auth → DB
+  </text>
+  <text class="elbl violet" data-e="e-wallet-db" x="992" y="400" text-anchor="start" font-size="8.5">
+    Wallet → DB
+  </text>
+  <text class="elbl violet" data-e="e-rt-db" x="768" y="480" text-anchor="end" font-size="8.5">
+    Realtime → DB
+  </text>
+  <text class="elbl violet" data-e="e-lms-db" x="1268" y="400" text-anchor="end" font-size="8.5">
+    LMS → DB
+  </text>
+
+  <!-- ═══════════════ NODES ═══════════════ -->
+
+  <!-- ── Clients ── -->
+  <g class="node client" data-k="webapp" data-tag="Web" data-port="3000" data-stack="Next.js / Vinext">
+    <rect x="55" y="140" width="320" height="100"/>
+    <rect class="tag-bg" x="55" y="140" width="40" height="20"/>
+    <text class="tag" x="58" y="154">Web</text>
+    <text class="t" x="105" y="175">Web App</text>
+    <text class="m" x="105" y="193">Next.js / Vinext · :3000</text>
+    <text class="m" x="105" y="210">React SPA · Room UI · Ví · Podcast</text>
+  </g>
+
+  <g class="node client" data-k="flutter" data-tag="App" data-port="—" data-stack="Flutter / Dart">
+    <rect x="55" y="265" width="320" height="95"/>
+    <rect class="tag-bg" x="55" y="265" width="40" height="20"/>
+    <text class="tag" x="58" y="279">App</text>
+    <text class="t" x="105" y="300">Flutter App</text>
+    <text class="m" x="105" y="318">iOS / Android</text>
+    <text class="m" x="105" y="335">Kết nối tương tự Web App</text>
+  </g>
+
+  <!-- ── Services ── -->
+  <g class="node service" data-k="auth" data-tag="Svc" data-port="5000" data-stack=".NET 10">
+    <rect x="480" y="145" width="260" height="95"/>
+    <rect class="tag-bg" x="480" y="145" width="48" height="20"/>
+    <text class="tag" x="483" y="159">Svc</text>
+    <text class="t" x="538" y="180">Auth Service</text>
+    <text class="m" x="538" y="198">.NET 10 · :5000</text>
+    <text class="m" x="538" y="215">JWT · Đăng ký · Đăng nhập</text>
+  </g>
+
+  <g class="node service" data-k="wallet" data-tag="Svc" data-port="5041" data-stack=".NET 10">
+    <rect x="820" y="145" width="260" height="95"/>
+    <rect class="tag-bg" x="820" y="145" width="48" height="20"/>
+    <text class="tag" x="823" y="159">Svc</text>
+    <text class="t" x="878" y="180">Wallet Service</text>
+    <text class="m" x="878" y="198">.NET 10 · :5041</text>
+    <text class="m" x="878" y="215">Ví · Nạp tiền · Quà · Podcast · Swagger UI</text>
+  </g>
+
+  <g class="node service" data-k="realtime" data-tag="Svc" data-port="3020" data-stack="Node.js 22">
+    <rect x="480" y="280" width="580" height="130"/>
+    <rect class="tag-bg" x="480" y="280" width="48" height="20"/>
+    <text class="tag" x="483" y="294">Svc</text>
+    <text class="t" x="538" y="315">Realtime Audio Service</text>
+    <text class="m" x="538" y="333">Node.js 22 · :3020</text>
+    <text class="m" x="538" y="351">Socket.IO (phòng) · WebRTC (báo hiệu)</text>
+    <text class="m" x="538" y="369">Tải tệp lên · Chia sẻ tài liệu</text>
+    <text class="m" x="538" y="387">Gửi quà tặng · Ghi âm</text>
+  </g>
+
+  <!-- ── Data ── -->
+  <g class="node db" data-k="mariadb" data-tag="DB" data-port="3306" data-stack="MariaDB">
+    <rect x="480" y="500" width="580" height="70"/>
+    <rect class="tag-bg" x="480" y="500" width="40" height="20"/>
+    <text class="tag" x="483" y="514">DB</text>
+    <text class="t" x="530" y="535">MariaDB</text>
+    <text class="m" x="530" y="550">:3306 · Instance dùng chung · Mỗi dịch vụ có bảng riêng</text>
+  </g>
+
+  <!-- ── LMS ── -->
+  <g class="node external" data-k="lms" data-tag="LMS" data-port="—" data-stack="Java 17">
+    <rect x="1135" y="140" width="280" height="70"/>
+    <rect class="tag-bg" x="1135" y="140" width="46" height="20"/>
+    <text class="tag" x="1138" y="154">LMS</text>
+    <text class="t" x="1191" y="170">Learning Management</text>
+    <text class="m" x="1191" y="188">Java 17 · Console App · Design Patterns</text>
+  </g>
+
+  <!-- WebRTC P2P annotation inside clients zone -->
+  <g class="webrtc-anno">
+    <text x="215" y="248">📡 WebRTC P2P</text>
+    <text class="sub" x="215" y="262">Âm thanh thời gian thực giữa trình duyệt</text>
+  </g>
+
+</svg>
+</div>
+
+  <!-- ── Floating: Flow caption ──────────────── -->
+  <div class="card" id="flowcap">
+    <div class="fname" id="f-name">Tổng quan</div>
+    <ol id="f-steps"></ol>
+  </div>
+
+  <!-- ── Floating: Node detail ───────────────── -->
+  <div class="card hide" id="detail">
+    <button class="close-btn" id="detailClose">✕</button>
+    <h3 id="d-title">Chọn một thành phần</h3>
+    <div class="meta" id="d-meta">node detail</div>
+    <p id="d-body">Nhấp vào bất kỳ khối nào để xem thông tin chi tiết.</p>
+  </div>
+
+</div>
+
+<script>
+
+const DETAIL = {
+  webapp: {
+    t: "Web App",
+    m: " React SPA · Next.js / Vinext · :3000",
+    b: "Giao diện người dùng chính của nền tảng. Xây dựng bằng <b>Next.js / Vinext</b>, chạy trên trình duyệt. Cung cấp: giao diện phòng học, quản lý ví, podcast, và các tương tác thời gian thực qua <b>Socket.IO</b>."
+  },
+  flutter: {
+    t: "Flutter App",
+    m: " iOS / Android",
+    b: "Ứng dụng di động cho <b>iOS và Android</b> bằng <b>Flutter</b>. Cung cấp trải nghiệm học ngôn ngữ tương tự Web App với hỗ trợ đầy đủ các tính năng: đăng nhập, gọi âm thanh, quản lý tài khoản."
+  },
+  auth: {
+    t: "Auth Service",
+    m: " .NET 10 · :5000",
+    b: "Dịch vụ xác thực tập trung. Chịu trách nhiệm <b>đăng ký</b> và <b>đăng nhập</b> người dùng, phát hành <b>JWT token</b>. Các dịch vụ khác (Realtime) xác minh token qua endpoint <code>:5000/me</code>."
+  },
+  wallet: {
+    t: "Wallet Service",
+    m: " .NET 10 · :5041",
+    b: "Quản lý <b>ví điện tử</b> của người dùng: số dư, nạp tiền, quà tặng. Cung cấp CRUD cho <b>podcast</b>. Kèm <b>Swagger UI</b> để test API trực tiếp. Mỗi user có một ví riêng."
+  },
+  realtime: {
+    t: "Realtime Audio Service",
+    m: " Node.js 22 · :3020",
+    b: "Dịch vụ thời gian thực cốt lõi. Sử dụng <b>Socket.IO</b> để quản lý phòng (<code>room:join</code>), chat, ghi âm, sự kiện quà tặng. Xử lý <b>báo hiệu WebRTC</b> cho kết nối âm thanh P2P. Nhận <b>tải tệp lên</b> (ghi âm, tài liệu) và xác thực JWT qua Auth Service."
+  },
+  mariadb: {
+    t: "MariaDB",
+    m: " :3306 · Shared Instance",
+    b: "Cơ sở dữ liệu quan hệ dùng chung. Mỗi dịch vụ có <b>bảng riêng</b> (schema per service). Lưu trữ: người dùng, ví, giao dịch, phòng, bản ghi âm, podcast, nội dung LMS."
+  },
+  lms: {
+    t: "Learning Management",
+    m: " Java 17 · Console",
+    b: "Hệ thống quản lý học tập chạy trên <b>Java 17</b> (console). Áp dụng các <b>design patterns</b> trong quá trình phát triển. Quản lý nội dung khóa học, tiến độ học viên."
+  }
+};
+
+
+const FLOWS = {
+  all: {
+    name: "Tổng quan — tất cả kết nối",
+    edges: [],
+    nodes: [],
+    steps: []
+  },
+  login: {
+    name: "Đăng nhập — luồng xác thực",
+    edges: ["e-web-auth","e-web-auth","e-auth-web","e-auth-db"],
+    nodes: ["webapp","auth","mariadb"],
+    steps: [
+      "<b>1.</b> Người dùng nhập thông tin đăng nhập qua Web App",
+      "<b>2.</b> Auth Service xác thực và phát hành JWT token",
+      "<b>3.</b> Lưu thông tin người dùng vào MariaDB",
+      "<b>4.</b> JWT token được trả về Web App dùng cho các yêu cầu sau"
+    ]
+  },
+  topup: {
+    name: "Nạp tiền — luồng thanh toán",
+    edges: ["e-web-wallet","e-wallet-db"],
+    nodes: ["webapp","wallet","mariadb"],
+    steps: [
+      "<b>1.</b> Người dùng gửi yêu cầu nạp tiền từ Web App",
+      "<b>2.</b> Wallet Service xử lý giao dịch nạp tiền",
+      "<b>3.</b> Cập nhật số dư và lịch sử giao dịch trong MariaDB"
+    ]
+  },
+  audio: {
+    name: "Gọi âm thanh — luồng thời gian thực",
+    edges: ["e-web-rt-ws","e-rt-auth","e-webrtc"],
+    nodes: ["webapp","realtime","auth"],
+    steps: [
+      "<b>1.</b> Web App tham gia phòng qua Socket.IO (room:join)",
+      "<b>2.</b> Realtime Service xác thực JWT qua Auth Service (:5000/me)",
+      "<b>3.</b> Báo hiệu WebRTC — trình duyệt kết nối P2P trực tiếp",
+      "<b>4.</b> Luồng âm thanh thời gian thực giữa các trình duyệt"
+    ]
+  },
+  upload: {
+    name: "Tải ghi âm — luồng tải lên",
+    edges: ["e-web-rt-up","e-rt-db"],
+    nodes: ["webapp","realtime","mariadb"],
+    steps: [
+      "<b>1.</b> Web App tải tệp ghi âm / tài liệu lên Realtime Service",
+      "<b>2.</b> Realtime Service lưu thông tin tệp vào MariaDB",
+      "<b>3.</b> Tệp sẵn sàng để phát lại hoặc chia sẻ trong phòng"
+    ]
+  },
+  gift: {
+    name: "Quà tặng — luồng tương tác",
+    edges: ["e-web-rt-ws","e-web-wallet","e-wallet-db"],
+    nodes: ["webapp","wallet","realtime"],
+    steps: [
+      "<b>1.</b> Người dùng gửi quà tặng qua Socket.IO trong phòng",
+      "<b>2.</b> Wallet Service ghi nhận giao dịch quà tặng",
+      "<b>3.</b> Cập nhật số dư người gửi và lịch sử trong MariaDB"
+    ]
+  }
+};
+
+
+const stageWrap = document.getElementById('stageWrap');
+const svgOut = document.getElementById('svgOut');
+const nodes = document.querySelectorAll('.node');
+const edges = document.querySelectorAll('.edge');
+const elbls = document.querySelectorAll('.elbl');
+const chips = document.querySelectorAll('.chip');
+const detailCard = document.getElementById('detail');
+const flowcap = document.getElementById('flowcap');
+const flowName = document.getElementById('f-name');
+const flowSteps = document.getElementById('f-steps');
+
+
+let scale = 1;
+let tx = 0, ty = 0;
+let isDragging = false;
+let dragStartX = 0, dragStartY = 0;
+let dragStartTx = 0, dragStartTy = 0;
+let dragMoved = false;
+
+function applyTransform() {
+  svgOut.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  document.getElementById('zoomLbl').textContent = `${Math.round(scale * 100)}%`;
+}
+
+function resetView() {
+  scale = 1; tx = 0; ty = 0;
+  applyTransform();
+}
+
+function zoomAt(wx, wy, delta) {
+  const oldScale = scale;
+  scale = Math.max(0.2, Math.min(4, scale * (delta > 0 ? 1.12 : 1 / 1.12)));
+  const f = scale / oldScale;
+  // keep the SVG point under cursor fixed
+  tx = wx - (wx - tx) * f;
+  ty = wy - (wy - ty) * f;
+  applyTransform();
+}
+
+
+stageWrap.addEventListener('wheel', e => {
+  e.preventDefault();
+  const rect = stageWrap.getBoundingClientRect();
+  zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1 : -1);
+}, { passive: false });
+
+
+stageWrap.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  isDragging = true;
+  dragMoved = false;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  dragStartTx = tx;
+  dragStartTy = ty;
+  stageWrap.classList.add('grabbing');
+});
+
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  const dx = e.clientX - dragStartX;
+  const dy = e.clientY - dragStartY;
+  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved = true;
+  tx = dragStartTx + dx;
+  ty = dragStartTy + dy;
+  applyTransform();
+});
+
+window.addEventListener('mouseup', () => {
+  if (!isDragging) return;
+  isDragging = false;
+  stageWrap.classList.remove('grabbing');
+});
+
+stageWrap.addEventListener('click', e => {
+  if (dragMoved) { e.stopPropagation(); e.stopImmediatePropagation(); }
+}, { capture: true, once: false });
+
+function setFlow(key) {
+  chips.forEach(c => { c.classList.toggle('on', c.dataset.flow === key); });
+  edges.forEach(e => { e.classList.remove('lit'); });
+  elbls.forEach(l => { l.classList.remove('lit'); });
+  nodes.forEach(n => { n.classList.remove('lit'); });
+  if (key === 'all') {
+    stageWrap.classList.remove('flowing');
+    flowcap.style.display = 'none';
+    return;
+  }
+  const f = FLOWS[key];
+  if (!f) return;
+  stageWrap.classList.add('flowing');
+  f.edges.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('lit');
+  });
+  elbls.forEach(l => {
+    if (f.edges.includes(l.dataset.e)) l.classList.add('lit');
+  });
+  f.nodes.forEach(k => {
+    const el = document.querySelector(`.node[data-k="${k}"]`);
+    if (el) el.classList.add('lit');
+  });
+  flowName.textContent = f.name;
+  flowSteps.innerHTML = f.steps.map(s => `<li>${s}</li>`).join('');
+  flowcap.style.display = 'block';
+}
+
+chips.forEach(c => { c.addEventListener('click', () => setFlow(c.dataset.flow)); });
+
+nodes.forEach(n => { n.addEventListener('click', () => {
+  if (dragMoved) { dragMoved = false; return; }
+  nodes.forEach(x => { x.classList.remove('sel'); });
+  n.classList.add('sel');
+  const d = DETAIL[n.dataset.k];
+  if (!d) return;
+  document.getElementById('d-title').textContent = d.t;
+  document.getElementById('d-meta').textContent = d.m;
+  document.getElementById('d-body').innerHTML = d.b;
+  detailCard.classList.remove('hide');
+}); });
+
+document.getElementById('detailClose').addEventListener('click', () => {
+  detailCard.classList.add('hide');
+  nodes.forEach(n => { n.classList.remove('sel'); });
+});
+
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const dark = !document.documentElement.classList.contains('dark');
+  document.documentElement.classList.toggle('dark', dark);
+  localStorage.setItem('lucyscheme', dark ? 'dark' : 'light');
+});
+
+document.getElementById('resetBtn').addEventListener('click', resetView);
+resetView();
+</script>
+</body>
+</html>

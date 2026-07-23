@@ -96,12 +96,57 @@ Client  ──GET/POST JSON──▶  Auth / Wallet / Realtime (REST)
 
 ### WebSocket (Socket.IO)
 
-Dùng cho real-time audio room:
+Dùng cho real-time audio room và signaling:
 
 ```
 Client  ──Socket.IO events──▶  Realtime Service
-        ◀──Socket.IO emit────  (room:state, chat, recording, gift, WebRTC)
+        ◀──Socket.IO emit────  (room:state, chat, recording:update, gift:announced)
 ```
+
+Socket.IO events chính:
+
+| Event | Direction | Mô tả |
+|---|---|---|
+| `room:join` | Client → Server | Tham gia phòng học |
+| `room:state` | Server → Room | Trạng thái phòng (participants, mic, hand) |
+| `mic:toggle` | Client → Server | Bật/tắt mic |
+| `hand:raise` | Client → Server | Giơ tay/hạ tay |
+| `chat:send` / `chat:message` | Client → Server → Room | Gửi/nhận tin nhắn |
+| `recording:start` / `recording:stop` | Client → Server | Bắt đầu/kết thúc ghi âm |
+| `recording:update` | Server → Room | Cập nhật trạng thái ghi âm |
+| `latency:ping` / `latency:pong` | Client ↔ Server | Đo độ trễ mạng |
+
+### WebRTC (Peer-to-Peer)
+
+Truyền âm thanh real-time giữa các participants trong phòng:
+
+```
+User A ──getUserMedia──▶ Local Audio Stream
+  │
+  ├──RTCPeerConnection──▶ User B (P2P audio)
+  │    └──webrtc:offer/answer/ice-candidate──▶ Realtime (Signaling relay)
+  │
+  └──Socket.IO signaling──▶ Realtime Service ──forward──▶ User B
+```
+
+**Luồng WebRTC:**
+1. User join room → `getUserMedia({ audio: true })` → local stream
+2. Với mỗi user khác trong room → tạo `RTCPeerConnection`
+3. Offer/Answer qua Socket.IO signaling (`webrtc:offer`, `webrtc:answer`)
+4. ICE candidates trao đổi qua STUN (`stun:stun.l.google.com:19302`)
+5. Kết nối P2P → audio stream giữa 2 browser
+
+### HTTP File Upload
+
+Upload audio recording và tài liệu qua HTTP multipart:
+
+```
+Web Client ──POST /api/upload-recording──▶ Realtime Service
+            ──POST /api/upload-document────▶ Realtime Service
+```
+
+- **Recording**: Upload xong → auto INSERT vào `podcast_recordings`
+- **Document**: Upload xong → broadcast `document:shared` → room members nhận được
 
 ### MariaDB Transactions
 
@@ -265,34 +310,57 @@ Client ──POST /agora/token──▶ Realtime Service
 | **Phase 2** | + Realtime | Socket.IO rooms, Agora scaffold, Health check |
 | **Phase 3** | + LMS (Java) | State pattern, Mentor dashboard, Material pins |
 | **Phase 4** | + Wallet | Top-up, Gift, Podcast, Cross-service flow, SOA |
-| **Phase 5** | + Stress Test + Flutter | k6 stress, Cross testing, Mobile app |
+| **Phase 5** | + Stress Test + Flutter + WebRTC + Documents | WebRTC audio, Document sharing, Recording→Podcast, Room password, Stress test, Flutter app |
 
-Database phát triển theo phase: `lucy_phase1` -> `lucy_phase2` -> ... -> `lucy_phase5` (24 tables).
+Database phát triển theo phase: `lucy_phase1` -> `lucy_phase2` -> ... -> `lucy_phase5` (24+ tables).
+
+### Tính năng Phase 5
+
+1. **WebRTC Real-time Audio** — Truyền âm thanh P2P giữa users trong phòng qua STUN
+2. **Recording → Podcast** — Ghi âm trong phòng → upload lên server → auto INSERT vào podcast_recordings
+3. **Document Sharing** — Upload PDF/DOCX vào phòng, broadcast cho participants
+4. **Room Password** — Optional password protection, hash bằng Node scrypt
+5. **Room UI Redesign** — Giao diện audio-call style (Google Meet), bottom control bar
+6. **Persistent Rooms** — Room state được lưu vào localStorage, tự động reconnect
+7. **Wallet Integration** — Gift sending, podcast CRUD, transaction history
+8. **Stress Testing** — k6 scripts cho auth/realtime/wallet endpoints
+9. **Flutter Mobile** — Cross-platform mobile app với đầy đủ tính năng
 
 ---
 
 ## 8. Folder Structure
 
 ```
-swd/
+SWD392_SU26/
 ├── phase1-rbl/
 │   ├── database/            # Schema + seed cho Phase 1
 │   ├── docs/                # Tài liệu Phase 1
-│   ├── dotnet-auth/         # Auth Service (.NET)
+│   ├── dotnet-auth/         # Auth Service (.NET :5000)
 │   ├── java-importer/       # Java Word importer skeleton
 │   ├── tools/               # Python digitization scripts
 │   ├── uml/                 # PlantUML diagrams
 │   └── generated/           # Digitized content output
 ├── phase2-rbl/
-│   └── realtime-audio/      # Realtime Service (Node.js)
+│   └── realtime-audio/      # Realtime Service (Node.js :3020)
 ├── phase3-rbl/
-│   └── java-lms/            # LMS Service (Java)
+│   └── java-lms/            # LMS Service (Java Console)
 ├── phase4-rbl/
-│   └── dotnet-wallet/       # Wallet Service (.NET)
+│   └── dotnet-wallet/       # Wallet Service (.NET :5041)
 ├── phase5-rbl/
+│   ├── database/            # SQL schema tổng hợp Phase 1→5
+│   ├── docs/                # Tài liệu Phase 5
+│   ├── dotnet-auth/         # Auth Service (copy, chạy phase 5)
+│   ├── dotnet-wallet/       # Wallet Service (copy, chạy phase 5)
+│   ├── realtime-audio/      # Realtime Service (main, phase 5)
+│   ├── java-lms/            # LMS Service (copy, chạy phase 5)
 │   ├── stress-tests/        # k6 scripts
 │   ├── final-evaluation/    # Kết quả đánh giá
-│   └── flutter_app/         # Flutter mobile app
-├── docs/                    # Tài liệu tổng hợp
+│   ├── generated/           # Digitized content
+│   ├── tools/               # Utility scripts
+│   └── uml/                 # PlantUML diagrams
+├── web_app/                 # Web App (Next.js/Vinext :3000)
+├── flutter_app/             # Flutter Mobile App
+├── docs-new/                # Tài liệu cập nhật
+├── local-env.sh             # Environment variables
 └── *.docx / *.pdf           # Tài liệu nguồn học liệu
 ```
