@@ -97,6 +97,7 @@ test("keeps web contracts and proxy boundaries explicit", async () => {
   assert.match(page, /maxLength=\{MAX_CHAT_MESSAGE_LENGTH\}/);
   assert.match(page, /className=\{`documents-drawer/);
   assert.match(page, /aria-expanded=\{documentsOpen\}/);
+  assert.match(page, /\[documentsOpen, setDocumentsOpen\] = useState\(false\)/);
   assert.match(page, /Đóng khu vực tài liệu/);
   assert.match(page, /Chưa có PRO hoặc SUPER trong phòng/);
   assert.match(page, /context\.createAnalyser\(\)/);

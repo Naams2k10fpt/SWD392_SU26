@@ -801,7 +801,7 @@ function RoomView({ session, compact, onCreateRoom }: { session: Session; compac
   const [giftSending, setGiftSending] = useState(false);
   const [giftError, setGiftError] = useState("");
   const [documentSending, setDocumentSending] = useState(false);
-  const [documentsOpen, setDocumentsOpen] = useState(true);
+  const [documentsOpen, setDocumentsOpen] = useState(false);
   const [passwordRoomId, setPasswordRoomId] = useState("");
   const [joinPassword, setJoinPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
